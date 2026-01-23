@@ -1,0 +1,33 @@
+.venv
+
+.env
+
+# Frontend dependencies and build files
+/frontend/node_modules
+/frontend/.next
+/frontend/out
+/frontend/build
+
+# Environment variables
+/frontend/.env*.local
+/frontend/.env
+
+# TypeScript
+/frontend/*.tsbuildinfo
+/frontend/next-env.d.ts
+
+# Logs
+/frontend/npm-debug.log*
+/frontend/yarn-debug.log*
+/frontend/yarn-error.log*
+
+# misc
+/frontend/.DS_Store
+/frontend/*.pem
+
+# Vercel
+/frontend/.vercel
+
+
+/backend/__pycache__
+/backend/services/__pycache__ 
