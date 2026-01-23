@@ -43,7 +43,7 @@ class OpenAIService:
         
         # Step 3: Build messages
         messages = [
-            {"role": "system", "content": "You are a helpful AI assistant for Neolytix. Be concise, professional, and helpful."}
+            {"role": "system", "content": "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."}
         ]
         if conversation_history:
             messages.extend(conversation_history)

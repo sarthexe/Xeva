@@ -60,7 +60,6 @@ class ComplexityClassifier:
         try:
             response = self.client.chat.completions.create(
                 model=MODELS["nano"],  # Use cheapest model for classification
-                temperature=0.0,
                 messages=[
                     {"role": "system", "content": CLASSIFIER_PROMPT},
                     {"role": "user", "content": message}
