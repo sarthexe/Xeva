@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { Sparkles, Zap, Brain, Shield, ArrowRight } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
+import Image from 'next/image'
 
 // Google Client ID from environment
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''
@@ -15,6 +16,12 @@ declare global {
                     initialize: (config: object) => void
                     renderButton: (element: HTMLElement, config: object) => void
                     prompt: () => void
+                    cancel: () => void
+                }
+                oauth2: {
+                    initCodeClient: (config: object) => {
+                        requestCode: () => void
+                    }
                 }
             }
         }
@@ -25,6 +32,8 @@ export default function LoginPage() {
     const { login, continueAsGuest, isLoading } = useAuth()
     const [isGoogleLoading, setIsGoogleLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [scriptLoaded, setScriptLoaded] = useState(false)
+    const googleButtonRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         // Load Google Identity Services script
@@ -32,11 +41,15 @@ export default function LoginPage() {
         script.src = 'https://accounts.google.com/gsi/client'
         script.async = true
         script.defer = true
-        script.onload = initializeGoogle
+        script.onload = () => {
+            setScriptLoaded(true)
+        }
+        script.onerror = () => {
+            setError('Failed to load Google Sign-In. Please refresh the page.')
+        }
         document.body.appendChild(script)
 
         return () => {
-            // Cleanup script on unmount
             const existingScript = document.querySelector('script[src="https://accounts.google.com/gsi/client"]')
             if (existingScript) {
                 existingScript.remove()
@@ -44,31 +57,36 @@ export default function LoginPage() {
         }
     }, [])
 
-    const initializeGoogle = () => {
-        if (!window.google || !GOOGLE_CLIENT_ID) {
-            console.error('Google Identity Services not loaded or Client ID missing')
+    // Initialize Google Sign-In when script is loaded
+    useEffect(() => {
+        if (!scriptLoaded || !window.google || !GOOGLE_CLIENT_ID) {
             return
         }
 
-        window.google.accounts.id.initialize({
-            client_id: GOOGLE_CLIENT_ID,
-            callback: handleGoogleCallback,
-            auto_select: false,
-        })
-
-        const buttonDiv = document.getElementById('google-signin-button')
-        if (buttonDiv) {
-            window.google.accounts.id.renderButton(buttonDiv, {
-                type: 'standard',
-                theme: document.documentElement.classList.contains('dark') ? 'filled_black' : 'outline',
-                size: 'large',
-                text: 'signin_with',
-                shape: 'rectangular',
-                logo_alignment: 'left',
-                width: 300,
+        try {
+            window.google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleGoogleCallback,
+                auto_select: false,
+                cancel_on_tap_outside: true,
             })
+
+            // Render the hidden Google button for fallback
+            if (googleButtonRef.current) {
+                window.google.accounts.id.renderButton(googleButtonRef.current, {
+                    type: 'standard',
+                    theme: 'outline',
+                    size: 'large',
+                    text: 'signin_with',
+                    shape: 'pill',
+                    width: 300,
+                })
+            }
+        } catch (err) {
+            console.error('Failed to initialize Google Sign-In:', err)
+            setError('Failed to initialize Google Sign-In.')
         }
-    }
+    }, [scriptLoaded])
 
     const handleGoogleCallback = async (response: { credential: string }) => {
         setIsGoogleLoading(true)
@@ -80,9 +98,21 @@ export default function LoginPage() {
                 setError('Failed to sign in. Please try again.')
             }
         } catch (err) {
+            console.error('Login error:', err)
             setError('An unexpected error occurred. Please try again.')
         } finally {
             setIsGoogleLoading(false)
+        }
+    }
+
+    const handleGoogleClick = () => {
+        // Click the hidden Google button to trigger sign-in
+        const googleButton = googleButtonRef.current?.querySelector('div[role="button"]') as HTMLElement
+        if (googleButton) {
+            googleButton.click()
+        } else if (window.google) {
+            // Fallback to prompt
+            window.google.accounts.id.prompt()
         }
     }
 
@@ -90,121 +120,159 @@ export default function LoginPage() {
         continueAsGuest()
     }
 
-    const features = [
-        {
-            icon: Brain,
-            title: 'Intelligent Routing',
-            description: 'Automatically selects the optimal AI model for your query',
-        },
-        {
-            icon: Zap,
-            title: 'Lightning Fast',
-            description: 'Streaming responses for instant perceived performance',
-        },
-        {
-            icon: Shield,
-            title: 'Secure & Private',
-            description: 'Your conversations are protected and never stored permanently',
-        },
-    ]
-
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-zinc-50 via-white to-zinc-100 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950 px-4">
-            {/* Background decoration */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-gradient-to-br from-violet-500/10 to-indigo-500/10 rounded-full blur-3xl" />
-                <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-gradient-to-br from-cyan-500/10 to-emerald-500/10 rounded-full blur-3xl" />
-            </div>
+        <div className="min-h-screen flex flex-col bg-white dark:bg-[#09090b] relative overflow-hidden">
+            {/* Background Glow Effects - matching ChatArea */}
+            <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-900/10 blur-[120px] pointer-events-none" />
+            <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-900/5 blur-[120px] pointer-events-none" />
 
-            <div className="relative z-10 w-full max-w-md">
-                {/* Logo and Brand */}
-                <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-lg shadow-violet-500/25 mb-4">
-                        <Sparkles className="w-8 h-8 text-white" />
-                    </div>
-                    <h1 className="text-3xl font-bold bg-gradient-to-r from-zinc-900 via-zinc-700 to-zinc-900 dark:from-white dark:via-zinc-300 dark:to-white bg-clip-text text-transparent">
-                        Welcome to Xeva
-                    </h1>
-                    <p className="text-zinc-500 dark:text-zinc-400 mt-2">
-                        Your intelligent AI assistant with automatic model selection
-                    </p>
+            {/* Navigation */}
+            <nav className="w-full px-8 py-5 flex items-center justify-between relative z-10">
+                <div className="flex items-center gap-8">
+                    <NavLink href="#" active>Home</NavLink>
+                    <NavLink href="#">Leaderboard</NavLink>
+                    <NavLink href="#">About</NavLink>
+                    <NavLink href="#">Blog</NavLink>
                 </div>
 
-                {/* Login Card */}
-                <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border border-zinc-200/50 dark:border-zinc-700/50 rounded-2xl shadow-xl shadow-zinc-900/5 dark:shadow-zinc-950/50 p-8">
-                    {/* Features List */}
-                    <div className="space-y-4 mb-8">
-                        {features.map((feature, index) => (
-                            <div key={index} className="flex items-start gap-3">
-                                <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-violet-500/10 to-indigo-500/10 dark:from-violet-500/20 dark:to-indigo-500/20 flex items-center justify-center">
-                                    <feature.icon className="w-5 h-5 text-violet-600 dark:text-violet-400" />
-                                </div>
-                                <div>
-                                    <h3 className="font-medium text-zinc-900 dark:text-zinc-100 text-sm">
-                                        {feature.title}
-                                    </h3>
-                                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                                        {feature.description}
-                                    </p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Divider */}
-                    <div className="relative my-6">
-                        <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-zinc-200 dark:border-zinc-700" />
-                        </div>
-                        <div className="relative flex justify-center text-sm">
-                            <span className="px-3 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400">
-                                Sign in to continue
-                            </span>
-                        </div>
-                    </div>
-
-                    {/* Google Sign In Button */}
-                    <div className="flex flex-col items-center gap-4">
-                        {error && (
-                            <div className="w-full p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm text-center">
-                                {error}
-                            </div>
-                        )}
-
-                        <div
-                            id="google-signin-button"
-                            className={`transition-opacity ${isGoogleLoading ? 'opacity-50 pointer-events-none' : ''}`}
-                        />
-
-                        {isGoogleLoading && (
-                            <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-                                <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                                Signing in...
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Guest Option */}
-                    <div className="mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700">
-                        <button
-                            onClick={handleGuestContinue}
-                            disabled={isLoading}
-                            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-sm font-medium"
-                        >
-                            Continue as Guest
-                            <ArrowRight className="w-4 h-4" />
-                        </button>
-                        <p className="text-xs text-zinc-400 dark:text-zinc-500 text-center mt-2">
-                            Guest mode doesn't save your chat history
-                        </p>
-                    </div>
+                {/* Logo - centered */}
+                <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
+                    <Image
+                        src="/x.png"
+                        alt="Xeva Logo"
+                        width={120}
+                        height={40}
+                        className="dark:invert"
+                    />
                 </div>
 
-                {/* Footer */}
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 text-center mt-6">
-                    By signing in, you agree to our Terms of Service and Privacy Policy
+                <div className="w-64" /> {/* Spacer for centering */}
+            </nav>
+
+            {/* Main Content */}
+            <main className="flex-1 flex flex-col items-center justify-center px-4 -mt-16 relative z-10">
+                {/* Heading */}
+                <h1 className="text-center mb-6">
+                    <span className="block text-5xl md:text-7xl font-bold text-zinc-900 dark:text-white tracking-tight">
+                        Every AI for
+                    </span>
+                    <span className="block text-5xl md:text-7xl font-bold italic bg-gradient-to-r from-violet-500 to-indigo-500 bg-clip-text text-transparent tracking-tight mt-2">
+                        everyone
+                    </span>
+                </h1>
+
+                {/* Subtitle */}
+                <p className="text-center text-zinc-500 dark:text-zinc-400 text-lg md:text-xl max-w-xl mb-10 leading-relaxed">
+                    Check out the best answers from all the latest AIs for free.
+                    <br />
+                    Win rewards. Shape the future of AI.
                 </p>
-            </div>
+
+                {/* Error Message */}
+                {error && (
+                    <div className="mb-4 px-4 py-2 rounded-lg bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+                        {error}
+                    </div>
+                )}
+
+                {/* Hidden Google Button - for triggering sign-in */}
+                <div
+                    ref={googleButtonRef}
+                    className="opacity-0 absolute pointer-events-none"
+                    style={{ visibility: 'hidden' }}
+                />
+
+                {/* Custom Google Sign In Button */}
+                <button
+                    onClick={handleGoogleClick}
+                    disabled={isGoogleLoading || !scriptLoaded}
+                    className={`
+            group flex items-center gap-3 px-6 py-4 rounded-full
+            bg-zinc-900 dark:bg-white
+            hover:bg-zinc-800 dark:hover:bg-zinc-100
+            text-white dark:text-zinc-900 font-semibold text-lg
+            shadow-xl shadow-zinc-900/20 dark:shadow-black/30
+            transition-all duration-200
+            disabled:opacity-70 disabled:cursor-not-allowed
+            hover:scale-[1.02]
+          `}
+                >
+                    {/* Google Icon */}
+                    <div className="w-8 h-8 bg-white dark:bg-zinc-100 rounded-full flex items-center justify-center shadow-inner">
+                        <svg width="18" height="18" viewBox="0 0 24 24">
+                            <path
+                                fill="#4285F4"
+                                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                            />
+                            <path
+                                fill="#34A853"
+                                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                            />
+                            <path
+                                fill="#FBBC05"
+                                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                            />
+                            <path
+                                fill="#EA4335"
+                                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                            />
+                        </svg>
+                    </div>
+
+                    <span>{scriptLoaded ? 'Sign in with Google' : 'Loading...'}</span>
+
+                    <ArrowRight
+                        size={20}
+                        className="transition-transform group-hover:translate-x-1"
+                    />
+                </button>
+
+                {/* Loading indicator */}
+                {isGoogleLoading && (
+                    <div className="mt-4 flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+                        <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm">Signing in...</span>
+                    </div>
+                )}
+
+                {/* Guest Option */}
+                <button
+                    onClick={handleGuestContinue}
+                    disabled={isLoading}
+                    className="mt-6 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white text-sm font-medium transition-colors"
+                >
+                    Continue as Guest →
+                </button>
+
+                {/* Debug info - remove in production */}
+                {!GOOGLE_CLIENT_ID && (
+                    <p className="mt-8 text-xs text-red-500">
+                        ⚠️ NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set in frontend/.env.local
+                    </p>
+                )}
+            </main>
+
+            {/* Footer */}
+            <footer className="py-6 text-center text-zinc-400 dark:text-zinc-600 text-xs relative z-10">
+                © 2026 Xeva. All rights reserved.
+            </footer>
         </div>
+    )
+}
+
+function NavLink({ href, children, active = false }: { href: string; children: React.ReactNode; active?: boolean }) {
+    return (
+        <a
+            href={href}
+            className={`
+        px-4 py-2 rounded-full text-sm font-medium transition-all
+        ${active
+                    ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white'
+                }
+      `}
+        >
+            {children}
+        </a>
     )
 }

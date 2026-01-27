@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { ChatSession } from '@/app/page'
 import {
   MessageSquare,
@@ -69,7 +70,13 @@ export default function Sidebar({
           {/* Header: Logo and Close (Only Visible when Expanded) */}
           {isExpanded ? (
             <div className="flex items-center justify-between mb-6 animate-fadeIn">
-              <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-white">Xeva</h1>
+              <Image
+                src="/x.png"
+                alt="Xeva Logo"
+                width={80}
+                height={28}
+                className="dark:invert"
+              />
               <button
                 onClick={() => setIsExpanded(false)}
                 className="p-1.5 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 transition-colors"

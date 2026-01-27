@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import {
@@ -420,8 +421,14 @@ function AboutTab() {
 
             {/* Logo & Version */}
             <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-                    <Sparkles className="text-white" size={32} />
+                <div className="w-16 h-16 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shadow-lg p-2">
+                    <Image
+                        src="/x.png"
+                        alt="Xeva Logo"
+                        width={48}
+                        height={48}
+                        className="dark:invert"
+                    />
                 </div>
                 <div>
                     <h4 className="text-xl font-bold text-zinc-900 dark:text-white">Xeva</h4>
