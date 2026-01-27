@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className="font-sans antialiased bg-white dark:bg-[#09090b] text-zinc-900 dark:text-zinc-200 transition-colors duration-200">
+      <body className="font-sans antialiased bg-white dark:bg-[#09090b] text-zinc-900 dark:text-zinc-200">
         <ThemeProvider>
           {children}
         </ThemeProvider>

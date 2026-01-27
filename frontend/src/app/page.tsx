@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import ChatArea from '@/components/ChatArea'
+import Sidebar from '@/components/Sidebar'
 
 export interface Message {
   id: string
@@ -34,6 +35,13 @@ export default function Home() {
   const currentChat = chats.find(c => c.id === currentChatId) || chats[0]
 
   const handleNewChat = () => {
+    // Prevent creating multiple empty chats
+    const emptyChat = chats.find(c => c.messages.length === 0)
+    if (emptyChat) {
+      setCurrentChatId(emptyChat.id)
+      return
+    }
+
     const newChat: ChatSession = {
       id: Date.now().toString(),
       title: 'New Chat',
@@ -60,17 +68,29 @@ export default function Home() {
     }))
   }
 
-  return (
-    <div className="flex h-screen w-screen bg-background transition-colors duration-200 overflow-hidden">
+  const handleSwitchChat = (id: string) => {
+    setCurrentChatId(id)
+  }
 
-      {currentChat && (
-        <ChatArea
-          key={currentChat.id} // Force remount on chat switch to reset scroll/input
-          messages={currentChat.messages}
-          onAddMessage={handleAddMessage}
-          onNewChat={handleNewChat}
-        />
-      )}
+  return (
+    <div className="flex h-screen w-screen bg-background overflow-hidden">
+      <Sidebar
+        chats={chats}
+        currentChatId={currentChatId}
+        onNewChat={handleNewChat}
+        onSwitchChat={handleSwitchChat}
+      />
+
+      <div className="flex-1 flex flex-col h-full relative ml-[6.5rem]">
+        {currentChat && (
+          <ChatArea
+            key={currentChat.id} // Force remount on chat switch to reset scroll/input
+            messages={currentChat.messages}
+            onAddMessage={handleAddMessage}
+            onNewChat={handleNewChat}
+          />
+        )}
+      </div>
     </div>
   )
 }

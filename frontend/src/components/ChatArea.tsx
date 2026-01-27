@@ -3,8 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Message } from '@/app/page'
 import MessageBubble from './MessageBubble'
-import { ArrowUp, Paperclip, Settings, Moon, Sun, Search, Square, Home } from 'lucide-react'
-import { useTheme } from './ThemeProvider'
+import { ArrowUp, Paperclip, Search, Square } from 'lucide-react'
 
 interface ChatAreaProps {
   messages: Message[]
@@ -91,7 +90,7 @@ function InputBox({
 
       <form onSubmit={onSubmit} className="relative group z-20">
         <div className={`
-          relative flex items-center gap-3 bg-zinc-100 dark:bg-[#1e1e1e] rounded-[32px] py-3 pl-4 pr-4
+          relative flex items-center gap-3 bg-zinc-100 dark:bg-zinc-800 rounded-[32px] py-3 pl-4 pr-4
           transition-all duration-300 ease-out border border-zinc-200 dark:border-zinc-800/60 focus-within:border-zinc-400 dark:focus-within:border-zinc-700
           ${centered ? 'shadow-xl shadow-black/10 dark:shadow-black/40' : 'shadow-lg'}
         `}>
@@ -162,12 +161,9 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
   const [isLoading, setIsLoading] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [prompts, setPrompts] = useState<string[]>([])
-  const [settingsOpen, setSettingsOpen] = useState(false)
-
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { theme, toggleTheme } = useTheme()
 
   const hasMessages = messages.length > 0 || isLoading
 
@@ -242,43 +238,7 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
       <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-purple-900/10 blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-900/5 blur-[120px] pointer-events-none" />
 
-      {/* Header - Fixed to viewport */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-sm">
-        {/* Home Icon - Left */}
-        <button
-          onClick={onNewChat}
-          className="p-2.5 rounded-xl text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all duration-200"
-          title="New Chat"
-        >
-          <Home size={20} />
-        </button>
 
-        <div className="relative">
-          <button
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            className="p-2.5 rounded-xl text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all duration-200"
-          >
-            <Settings size={20} />
-          </button>
-
-          {settingsOpen && (
-            <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl overflow-hidden animate-fadeIn backdrop-blur-xl">
-              <div className="p-2 space-y-1">
-                <div className="px-3 py-2 text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Appearance</div>
-                <button
-                  onClick={toggleTheme}
-                  className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
-                >
-                  <span className="flex items-center gap-2">
-                    {theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}
-                    {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-                  </span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </header>
 
       {/* Main Content Area */}
       {!hasMessages ? (
@@ -357,7 +317,7 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
           </div>
 
           {/* Bottom Input Area - Floating */}
-          <div className="fixed bottom-6 left-0 right-0 z-20 pointer-events-none px-4">
+          <div className="fixed bottom-6 left-[6.5rem] right-0 z-20 pointer-events-none px-4">
             <div className="max-w-3xl mx-auto pointer-events-auto">
               <InputBox
                 input={input}
