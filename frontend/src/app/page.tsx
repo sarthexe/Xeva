@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import ChatArea from '@/components/ChatArea'
 import Sidebar from '@/components/Sidebar'
+import LoginPage from '@/components/LoginPage'
+import { useAuth } from '@/contexts/AuthContext'
 
 export interface Message {
   id: string
@@ -22,15 +24,16 @@ export interface ChatSession {
 }
 
 export default function Home() {
+  const { isAuthenticated, isLoading } = useAuth()
   const [chats, setChats] = useState<ChatSession[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
 
   // Initialize with one empty chat if none exist
   useEffect(() => {
-    if (chats.length === 0 && !currentChatId) {
+    if (isAuthenticated && chats.length === 0 && !currentChatId) {
       handleNewChat()
     }
-  }, [])
+  }, [isAuthenticated])
 
   const currentChat = chats.find(c => c.id === currentChatId) || chats[0]
 
@@ -72,6 +75,23 @@ export default function Home() {
     setCurrentChatId(id)
   }
 
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-zinc-500 dark:text-zinc-400">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show login page if not authenticated
+  if (!isAuthenticated) {
+    return <LoginPage />
+  }
+
   return (
     <div className="flex h-screen w-screen bg-background overflow-hidden">
       <Sidebar
@@ -94,3 +114,4 @@ export default function Home() {
     </div>
   )
 }
+

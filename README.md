@@ -8,6 +8,7 @@ A robust AI chat application featuring automatic model selection and complexity 
   - **Nano** (GPT-5-nano): For simple queries, greetings, and factual questions.
   - **Mini** (GPT-5-mini): For balanced tasks requiring moderate reasoning.
   - **Full** (GPT-5.2): For complex problem-solving, coding, and analysis.
+- **Google Authentication**: Secure sign-in with Google OAuth 2.0
 - **Context-Aware**: Maintains conversation history for coherent multi-turn dialogues.
 - **Modern Interface**: Clean, responsive UI built with Next.js and Tailwind CSS, featuring dark mode support.
 - **Performance Metrics**: Displays model usage, response time, and token consumption for transparency.
@@ -15,15 +16,17 @@ A robust AI chat application featuring automatic model selection and complexity 
 
 ## Tech Stack
 
-- **Backend**: Python, FastAPI, OpenAI SDK
+- **Backend**: Python, FastAPI, OpenAI SDK, Google Auth
 - **Frontend**: TypeScript, Next.js, Tailwind CSS, Lucide React
 - **AI Models**: GPT-5.2, GPT-5-mini, GPT-5-nano
+- **Authentication**: Google OAuth 2.0, JWT
 
 ## Prerequisites
 
 - Python 3.12+
 - Node.js 22.22+
 - OpenAI API Key
+- Google Cloud Console account (for OAuth)
 
 ## Installation
 
@@ -36,7 +39,7 @@ Navigate to the project root and set up the Python environment.
 pip install -r backend/requirements.txt
 
 # Create .env file in the root directory
-# Add your API key: OPENAI_API_KEY=your_key_here
+# Add your API keys (see Configuration section below)
 ```
 
 ### 2. Frontend Setup
@@ -47,6 +50,21 @@ Navigate to the frontend directory and install dependencies.
 cd frontend
 npm install
 ```
+
+### 3. Google OAuth Setup
+
+To enable Google Sign-In:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Navigate to **APIs & Services > Credentials**
+4. Click **Create Credentials > OAuth 2.0 Client ID**
+5. Select **Web application** as the application type
+6. Add authorized JavaScript origins:
+   - `http://localhost:3000` (for development)
+7. Add authorized redirect URIs:
+   - `http://localhost:3000` (for development)
+8. Copy the **Client ID** and add it to your environment files
 
 ## Usage
 
@@ -77,10 +95,19 @@ The application will be available at `http://localhost:3000`.
 
 ### Environment Variables
 
-Create a `.env` file in the `backend` directory (or root, depending on your setup) with the following:
+Create a `.env` file in the project root with the following:
 
 ```env
 OPENAI_API_KEY=sk-...
+GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+JWT_SECRET=your_random_jwt_secret_key
+```
+
+Create a `.env.local` file in the `frontend` directory with:
+
+```env
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
 ### Model Configuration
@@ -102,7 +129,12 @@ MAX_TOKENS = {
 |----------|--------|-------------|
 | `/` | GET | Health check / Redirect to frontend |
 | `/api/chat` | POST | Process chat messages and return AI response |
+| `/api/chat/stream` | POST | Stream chat responses via SSE |
+| `/api/auth/google` | POST | Authenticate with Google token |
+| `/api/auth/me` | GET | Get current authenticated user |
+| `/api/health` | GET | Health check endpoint |
 
 ## License
 
 Proprietary - Neolytix Internal Use
+

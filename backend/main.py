@@ -1,5 +1,8 @@
 import json
-from fastapi import FastAPI, Request
+import jwt
+import secrets
+from datetime import datetime, timedelta
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,11 +12,17 @@ import os
 from pathlib import Path
 
 from services.openai_service import openai_service
+from services.auth_service import auth_service
 from config import APP_NAME, APP_VERSION
 
 # Get the project root directory (parent of backend)
 PROJECT_ROOT = Path(__file__).parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
+
+# JWT Secret for token signing
+JWT_SECRET = os.getenv("JWT_SECRET", secrets.token_hex(32))
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
 
 # Create FastAPI app
 app = FastAPI(
@@ -43,6 +52,15 @@ class ChatResponse(BaseModel):
     complexity: str
     response_time_ms: int
     usage: dict
+
+
+class GoogleAuthRequest(BaseModel):
+    token: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: dict
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -117,3 +135,73 @@ async def chat_stream(request: ChatRequest):
 async def health():
     """Health check endpoint."""
     return {"status": "healthy", "app": APP_NAME, "version": APP_VERSION}
+
+
+@app.post("/api/auth/google", response_model=AuthResponse)
+async def google_auth(request: GoogleAuthRequest):
+    """
+    Authenticate a user with their Google ID token.
+    
+    Returns a JWT token for subsequent API calls.
+    """
+    # Verify the Google token
+    google_user = await auth_service.verify_google_token(request.token)
+    
+    if not google_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Google token"
+        )
+    
+    # Get or create the user
+    user = auth_service.get_or_create_user(google_user)
+    
+    # Create JWT token
+    expiration = datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
+    token_payload = {
+        "sub": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "exp": expiration
+    }
+    jwt_token = jwt.encode(token_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    
+    return AuthResponse(
+        token=jwt_token,
+        user={
+            "id": user["id"],
+            "email": user["email"],
+            "name": user["name"],
+            "picture": user["picture"]
+        }
+    )
+
+
+@app.get("/api/auth/me")
+async def get_current_user(request: Request):
+    """Get the current authenticated user from JWT token."""
+    auth_header = request.headers.get("Authorization")
+    
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user = auth_service.get_user_by_id(payload["sub"])
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        return {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user["name"],
+            "picture": user["picture"]
+        }
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+

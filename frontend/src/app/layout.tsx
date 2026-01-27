@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
+import { AuthProvider } from '@/contexts/AuthContext'
 
 export const metadata: Metadata = {
   title: 'Xeva',
@@ -18,10 +19,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-sans antialiased bg-white dark:bg-[#09090b] text-zinc-900 dark:text-zinc-200">
-        <ThemeProvider>
-          {children}
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            {children}
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   )
 }
+
