@@ -1,159 +1,230 @@
 'use client'
 
-import { ChatSession } from '@/app/page'
-import { useTheme } from '@/components/ThemeProvider'
-import { MessageSquare, Moon, Sun, Edit2, Plus } from 'lucide-react'
 import { useState } from 'react'
+import { ChatSession } from '@/app/page'
+import {
+  MessageSquare,
+  User,
+  Crown,
+  History,
+  MoreHorizontal,
+  Home,
+  Settings,
+  X,
+  Search,
+  Gift,
+  ChevronDown,
+  Menu
+} from 'lucide-react'
+
+import { useTheme } from '@/components/ThemeProvider'
 
 interface SidebarProps {
-  isOpen: boolean
-  onClose: () => void
   onNewChat: () => void
   chats: ChatSession[]
   currentChatId: string | null
   onSwitchChat: (id: string) => void
-  onRenameChat: (id: string, newTitle: string) => void
 }
 
-export default function Sidebar({ 
-  isOpen, 
-  onClose, 
-  onNewChat, 
-  chats, 
-  currentChatId, 
+export default function Sidebar({
+  onNewChat,
+  chats,
+  currentChatId,
   onSwitchChat,
-  onRenameChat 
 }: SidebarProps) {
-  const { theme, toggleTheme } = useTheme()
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editTitle, setEditTitle] = useState('')
-
-  const startEditing = (chat: ChatSession) => {
-    setEditingId(chat.id)
-    setEditTitle(chat.title)
-  }
-
-  const saveTitle = () => {
-    if (editingId && editTitle.trim()) {
-      onRenameChat(editingId, editTitle.trim())
-    }
-    setEditingId(null)
-  }
+  const [isExpanded, setIsExpanded] = useState(false)
+  const { toggleTheme } = useTheme()
 
   return (
-    <>
-      {/* Mobile Overlay */}
-      <div 
-        className={`fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        onClick={onClose}
-      />
-      
-      <aside 
-        className={`
-          fixed lg:static inset-y-0 left-0 z-50
-          w-72 bg-surface-secondary dark:bg-surface-tertiary border-r border-border dark:border-border
-          flex flex-col
-          transform transition-transform duration-300 cubic-bezier(0.16, 1, 0.3, 1)
-          ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `}
-      >
-        {/* Logo Area */}
-        <div className="p-4 pt-6">
-          <div className="flex items-center justify-between mb-6 px-2">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-white dark:bg-surface-secondary border border-border dark:border-border flex items-center justify-center shadow-subtle">
-                <img
-                  src="/Logo_transparent.svg"
-                  alt="Neolytix logo"
-                  className="w-5 h-5 object-contain"
-                />
-              </div>
-              <span className="text-xl font-serif text-gray-800 dark:text-gray-100 tracking-tight">Neolytix</span>
-            </div>
-            {/* Theme Toggle */}
-            <button 
-              onClick={toggleTheme}
-              className="p-2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors"
+    <aside
+      className={`
+        flex flex-col bg-surface-secondary dark:bg-[#1c1c1e] border border-zinc-200 dark:border-zinc-800/50
+        transition-[width] ease-in-out z-50 
+        ${isExpanded ? 'duration-[800ms]' : 'duration-[400ms]'}
+        fixed left-4 top-4 bottom-4 rounded-[2rem] shadow-2xl backdrop-blur-xl
+        ${isExpanded ? 'w-80' : 'w-[4.5rem]'}
+        overflow-hidden font-sans
+      `}
+    >
+      <div className={`flex flex-col h-full ${isExpanded ? 'px-5 py-6' : 'items-center py-6'} w-full transition-all ${isExpanded ? 'duration-[700ms]' : 'duration-[600ms]'}`}>
+
+        {/* Header: Logo and Close (Only Visible when Expanded) */}
+        {isExpanded ? (
+          <div className="flex items-center justify-between mb-6 animate-fadeIn">
+            <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-white">Xeva</h1>
+            <button
+              onClick={() => setIsExpanded(false)}
+              className="p-1.5 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 transition-colors"
             >
-              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+              <X size={20} />
             </button>
           </div>
-          
-          {/* New Chat Button */}
-          <button
-            onClick={onNewChat}
-            className="w-full group flex items-center justify-between px-4 py-3 bg-white dark:bg-surface-secondary border border-border dark:border-border hover:border-primary/50 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white rounded-lg shadow-subtle hover:shadow-card transition-all duration-200"
-          >
-            <div className="flex items-center gap-3">
-              <Plus className="w-5 h-5 text-gray-400 group-hover:text-primary transition-colors" />
-              <span className="font-medium text-sm">New chat</span>
-            </div>
-          </button>
-        </div>
-
-        {/* Chat List */}
-        <div className="flex-1 px-3 py-2 overflow-y-auto">
-          <div className="text-xs font-medium text-gray-400 px-3 mb-2 uppercase tracking-wider">Recents</div>
-          <div className="flex flex-col gap-0.5">
-            {chats.map(chat => (
-              <div 
-                key={chat.id}
-                className={`
-                  group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors
-                  ${chat.id === currentChatId 
-                    ? 'bg-white dark:bg-surface-secondary shadow-sm text-gray-900 dark:text-white' 
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
-                  }
-                `}
-                onClick={() => onSwitchChat(chat.id)}
-              >
-                <MessageSquare size={16} className="opacity-50 flex-shrink-0" />
-                
-                {editingId === chat.id ? (
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    onBlur={saveTitle}
-                    onKeyDown={(e) => e.key === 'Enter' && saveTitle()}
-                    className="flex-1 bg-transparent border-none outline-none text-sm p-0 focus:ring-0"
-                    autoFocus
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="flex-1 text-sm truncate">{chat.title}</span>
-                )}
-
-                {/* Edit Button (visible on hover) */}
-                {editingId !== chat.id && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      startEditing(chat)
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-opacity"
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                )}
-              </div>
-            ))}
+        ) : (
+          /* Collapsed Logo/Icon placeholder */
+          <div className="mb-6">
+            <button
+              onClick={() => setIsExpanded(true)}
+              className="p-2 rounded-xl text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 dark:text-zinc-400 transition-colors"
+            >
+              <Menu size={20} />
+            </button>
           </div>
+        )}
+
+        {/* Navigation Section */}
+        <div className={`flex flex-col gap-1 w-full ${!isExpanded && 'items-center gap-4'}`}>
+          {/* Home Icon */}
+          <NavItem
+            icon={<Home size={20} />}
+            label="Home"
+            isExpanded={isExpanded}
+            onClick={onNewChat}
+            active={!currentChatId}
+          />
+
+          {/* Chat Icon */}
+          <NavItem
+            icon={<MessageSquare size={20} />}
+            label="New Chat"
+            isExpanded={isExpanded}
+            onClick={onNewChat}
+          />
+
+          {/* Fav Models Icon */}
+          <NavItem
+            icon={<Crown size={20} />}
+            label="Fav Models"
+            isExpanded={isExpanded}
+            onClick={() => { }}
+          />
+
+          {/* Profile Icon */}
+          <NavItem
+            icon={<User size={20} />}
+            label="Profile"
+            isExpanded={isExpanded}
+            onClick={() => { }}
+          />
+
+          {/* Settings Icon */}
+          <NavItem
+            icon={<Settings size={20} />}
+            label="Settings"
+            isExpanded={isExpanded}
+            onClick={toggleTheme}
+          />
         </div>
 
-        {/* User Profile */}
-        <div className="p-4 border-t border-border dark:border-border bg-surface-secondary dark:bg-surface-tertiary">
-          <button className="flex items-center gap-3 w-full p-2 rounded-lg hover:bg-white dark:hover:bg-surface-secondary hover:shadow-subtle transition-all duration-200 group">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-light to-white border border-primary/20 flex items-center justify-center text-primary font-medium text-sm">
-              NU
+        {/* Search and History (Visible only when Expanded) */}
+        {isExpanded && (
+          <div className="mt-6 flex-1 flex flex-col min-h-0 animate-fadeIn delay-100">
+            {/* Search Bar */}
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
+              <input
+                type="text"
+                placeholder="Search conversations"
+                className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-zinc-200 dark:focus:ring-zinc-700 transition-all placeholder:text-zinc-400"
+              />
             </div>
-            <div className="flex-1 text-left">
-              <div className="text-sm font-medium text-gray-700 dark:text-gray-200 group-hover:text-gray-900 dark:group-hover:text-white">Neolytix User</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">Pro Plan</div>
+
+            {/* History List */}
+            <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin">
+              <div className="mb-2 px-1 text-xs font-bold text-zinc-500 uppercase tracking-wider">Today</div>
+              <div className="space-y-1">
+                {chats.map(chat => (
+                  <button
+                    key={chat.id}
+                    onClick={() => onSwitchChat(chat.id)}
+                    className={`
+                      w-full text-left px-3 py-2 rounded-lg text-sm truncate transition-colors
+                      ${chat.id === currentChatId
+                        ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-bold'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 font-semibold'}
+                    `}
+                  >
+                    {chat.title}
+                  </button>
+                ))}
+              </div>
             </div>
-          </button>
+          </div>
+        )}
+
+        {/* Spacer for Collapsed State */}
+        {!isExpanded && <div className="flex-1" />}
+
+        {/* Bottom User Card */}
+        <div className={`mt-auto ${isExpanded ? 'animate-fadeIn delay-200' : ''}`}>
+          {isExpanded ? (
+            <div className="flex items-center gap-3 p-3 bg-white dark:bg-zinc-900/50 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold shrink-0">
+                S
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">Sarthak</div>
+                <div className="text-xs text-zinc-500 font-semibold truncate">Free Plan</div>
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleTheme(); }}
+                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700/50"
+              >
+                {/* Using Settings/Dots as ellipsis */}
+                <MoreHorizontal size={18} />
+              </button>
+            </div>
+          ) : (
+            /* Collapsed Avatar */
+            <button className="relative group w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold mx-auto transition-transform hover:scale-105">
+              S
+              <div className="absolute inset-0 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+          )}
         </div>
-      </aside>
-    </>
+
+      </div>
+    </aside >
+  )
+}
+
+function NavItem({
+  icon,
+  label,
+  isExpanded,
+  onClick,
+  active = false,
+  className = ""
+}: {
+  icon: React.ReactNode,
+  label: string,
+  isExpanded: boolean,
+  onClick: () => void,
+  active?: boolean,
+  className?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        relative group flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200
+        ${isExpanded ? 'w-full' : 'w-10 justify-center px-0'}
+        ${active
+          ? 'bg-amber-100/50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-100 font-bold'
+          : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-100 font-semibold'
+        }
+        ${className}
+      `}
+      title={!isExpanded ? label : undefined}
+    >
+      <div className={`flex-shrink-0 transition-colors ${active ? 'text-amber-700 dark:text-amber-400' : ''}`}>
+        {icon}
+      </div>
+
+      {isExpanded && (
+        <span className="text-sm font-bold whitespace-nowrap animate-fadeIn">
+          {label}
+        </span>
+      )}
+    </button>
   )
 }
