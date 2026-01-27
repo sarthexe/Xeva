@@ -1,20 +1,48 @@
-import time
-import asyncio
-from typing import List, Optional
-from openai import AsyncOpenAI
-import sys
-from pathlib import Path
-from config import OPENAI_API_KEY, MODELS, COMPLEXITY_MODEL_MAP, MAX_TOKENS
-from services.classifier import classifier
+"""
+OpenAI Service with Streaming and Connection Pooling
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+Optimizations:
+- Singleton pattern with persistent HTTP client
+- Connection pooling for reduced latency
+- Streaming support for instant perceived response
+"""
+
+import time
+import json
+from typing import List, Optional, AsyncGenerator
+import httpx
+from openai import AsyncOpenAI
+from config import OPENAI_API_KEY, MODELS
+from services.classifier import route_prompt
+
 
 class OpenAIService:
-    """OpenAI API service with automatic model selection."""
+    """OpenAI service with connection pooling and streaming."""
     
-    def __init__(self):
-        self.client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    _instance = None
+    _client = None
+    _http_client = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            # Persistent HTTP client with connection pooling
+            cls._http_client = httpx.AsyncClient(
+                timeout=60.0,
+                limits=httpx.Limits(
+                    max_keepalive_connections=10,
+                    max_connections=20
+                )
+            )
+            cls._client = AsyncOpenAI(
+                api_key=OPENAI_API_KEY,
+                http_client=cls._http_client
+            )
+        return cls._instance
+    
+    @property
+    def client(self):
+        return self._client
     
     async def chat(
         self,
@@ -22,26 +50,24 @@ class OpenAIService:
         conversation_history: Optional[List[dict]] = None
     ) -> dict:
         """
-        Send a message to OpenAI with automatic model selection.
-        
-        Args:
-            message: The user's message
-            conversation_history: Previous messages in the conversation
-            
-        Returns:
-            dict with response, model used, complexity, and timing
+        Send a message with automatic model selection.
+        Uses fast rule-based routing instead of LLM classification.
         """
         start_time = time.time()
         
-        # Step 1: Classify complexity (run sync classifier in executor to not block)
-        loop = asyncio.get_event_loop()
-        complexity = await loop.run_in_executor(None, classifier.classify, message)
+        # Step 1: Route instantly (~0.1ms)
+        model_tier = route_prompt(message)
+        model_id = MODELS[model_tier]
         
-        # Step 2: Get appropriate model
-        model_key = COMPLEXITY_MODEL_MAP[complexity]
-        model_id = MODELS[model_key]
+        # Map tier to complexity for response
+        tier_to_complexity = {
+            "nano": "simple",
+            "mini": "medium",
+            "full": "complex"
+        }
+        complexity = tier_to_complexity[model_tier]
         
-        # Step 3: Build messages
+        # Step 2: Build messages
         messages = [
             {"role": "system", "content": "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."}
         ]
@@ -49,18 +75,16 @@ class OpenAIService:
             messages.extend(conversation_history)
         messages.append({"role": "user", "content": message})
         
-        # Step 4: Call OpenAI (async)
-        # Note: gpt-5-nano/mini may not support max_tokens parameter or have different limits
-        response = await self.client.chat.completions.create(
+        # Step 3: Call OpenAI (async with connection pooling)
+        response = await self._client.chat.completions.create(
             model=model_id,
             messages=messages
         )
         
-        # Extract response text
+        # Extract response
         response_text = response.choices[0].message.content or ""
-        
-        # Get finish reason
         finish_reason = response.choices[0].finish_reason
+        
         if finish_reason == "content_filter":
             response_text = "I'm unable to help with that request."
         elif finish_reason == "length":
@@ -71,7 +95,7 @@ class OpenAIService:
         
         return {
             "response": response_text,
-            "model": model_key,
+            "model": model_tier,
             "model_id": model_id,
             "complexity": complexity,
             "response_time_ms": response_time_ms,
@@ -80,6 +104,69 @@ class OpenAIService:
                 "input_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.completion_tokens
             }
+        }
+    
+    async def chat_stream(
+        self,
+        message: str,
+        conversation_history: Optional[List[dict]] = None
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Stream response chunks for instant perceived response.
+        Yields chunks as they arrive from OpenAI.
+        """
+        start_time = time.time()
+        
+        # Route instantly
+        model_tier = route_prompt(message)
+        model_id = MODELS[model_tier]
+        
+        tier_to_complexity = {
+            "nano": "simple",
+            "mini": "medium", 
+            "full": "complex"
+        }
+        complexity = tier_to_complexity[model_tier]
+        
+        # Build messages
+        messages = [
+            {"role": "system", "content": "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."}
+        ]
+        if conversation_history:
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": message})
+        
+        # Yield routing info immediately
+        yield {
+            "type": "start",
+            "model": model_tier,
+            "model_id": model_id,
+            "complexity": complexity
+        }
+        
+        # Stream from OpenAI
+        stream = await self._client.chat.completions.create(
+            model=model_id,
+            messages=messages,
+            stream=True
+        )
+        
+        total_tokens = 0
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                total_tokens += 1  # Approximate
+                yield {
+                    "type": "content",
+                    "text": content
+                }
+        
+        # Final stats
+        end_time = time.time()
+        yield {
+            "type": "done",
+            "response_time_ms": int((end_time - start_time) * 1000),
+            "model": model_tier
         }
 
 

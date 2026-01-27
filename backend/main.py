@@ -1,6 +1,7 @@
+import json
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -47,8 +48,6 @@ class ChatResponse(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve the chat page."""
-    # For Next.js, the frontend should be running separately
-    # This endpoint can redirect or return a simple message
     html_content = """
     <!DOCTYPE html>
     <html>
@@ -80,6 +79,37 @@ async def chat(request: ChatRequest):
         complexity=result["complexity"],
         response_time_ms=result["response_time_ms"],
         usage=result["usage"]
+    )
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Streaming chat endpoint for instant perceived response.
+    
+    Returns Server-Sent Events (SSE) with chunks:
+    - {"type": "start", "model": "...", "complexity": "..."}
+    - {"type": "content", "text": "..."}
+    - {"type": "done", "response_time_ms": ...}
+    """
+    async def generate():
+        # Yield "thinking" indicator immediately for instant feedback
+        yield f"data: {json.dumps({'type': 'thinking'})}\n\n"
+        
+        async for chunk in openai_service.chat_stream(
+            message=request.message,
+            conversation_history=request.history
+        ):
+            yield f"data: {json.dumps(chunk)}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
     )
 
 
