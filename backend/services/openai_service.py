@@ -14,6 +14,7 @@ import httpx
 from openai import AsyncOpenAI
 from config import OPENAI_API_KEY, MODELS
 from services.classifier import route_prompt
+from services.rag_service import rag_service
 
 
 class OpenAIService:
@@ -47,11 +48,17 @@ class OpenAIService:
     async def chat(
         self,
         message: str,
-        conversation_history: Optional[List[dict]] = None
+        conversation_history: Optional[List[dict]] = None,
+        use_rag: bool = True
     ) -> dict:
         """
-        Send a message with automatic model selection.
+        Send a message with automatic model selection and RAG augmentation.
         Uses fast rule-based routing instead of LLM classification.
+        
+        Args:
+            message: User message
+            conversation_history: Previous conversation turns
+            use_rag: Whether to retrieve relevant context from knowledge base
         """
         start_time = time.time()
         
@@ -67,9 +74,25 @@ class OpenAIService:
         }
         complexity = tier_to_complexity[model_tier]
         
-        # Step 2: Build messages
+        # Step 2: Retrieve RAG context if enabled
+        rag_context = ""
+        sources_used = []
+        if use_rag:
+            try:
+                rag_results = await rag_service.search(message, top_k=5)
+                if rag_results:
+                    rag_context = await rag_service.get_context_for_query(message)
+                    sources_used = list(set([r.get('title', 'Unknown') for r in rag_results]))
+            except Exception as e:
+                print(f"RAG retrieval error: {e}")
+        
+        # Step 3: Build messages with RAG context
+        system_content = "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."
+        if rag_context:
+            system_content += f"\n\nUse the following context from the knowledge base to help answer the user's question. If the context is relevant, incorporate it into your response and cite the sources. If the context isn't relevant, you can ignore it.\n\n{rag_context}"
+        
         messages = [
-            {"role": "system", "content": "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."}
+            {"role": "system", "content": system_content}
         ]
         if conversation_history:
             messages.extend(conversation_history)
@@ -100,6 +123,8 @@ class OpenAIService:
             "complexity": complexity,
             "response_time_ms": response_time_ms,
             "stop_reason": finish_reason,
+            "rag_enabled": use_rag,
+            "sources": sources_used,
             "usage": {
                 "input_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.completion_tokens
@@ -109,11 +134,17 @@ class OpenAIService:
     async def chat_stream(
         self,
         message: str,
-        conversation_history: Optional[List[dict]] = None
+        conversation_history: Optional[List[dict]] = None,
+        use_rag: bool = True
     ) -> AsyncGenerator[dict, None]:
         """
         Stream response chunks for instant perceived response.
         Yields chunks as they arrive from OpenAI.
+        
+        Args:
+            message: User message
+            conversation_history: Previous conversation turns
+            use_rag: Whether to retrieve relevant context from knowledge base
         """
         start_time = time.time()
         
@@ -128,20 +159,38 @@ class OpenAIService:
         }
         complexity = tier_to_complexity[model_tier]
         
-        # Build messages
+        # Retrieve RAG context if enabled
+        rag_context = ""
+        sources_used = []
+        if use_rag:
+            try:
+                rag_results = await rag_service.search(message, top_k=5)
+                if rag_results:
+                    rag_context = await rag_service.get_context_for_query(message)
+                    sources_used = list(set([r.get('title', 'Unknown') for r in rag_results]))
+            except Exception as e:
+                print(f"RAG retrieval error: {e}")
+        
+        # Build messages with RAG context
+        system_content = "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."
+        if rag_context:
+            system_content += f"\n\nUse the following context from the knowledge base to help answer the user's question. If the context is relevant, incorporate it into your response and cite the sources. If the context isn't relevant, you can ignore it.\n\n{rag_context}"
+        
         messages = [
-            {"role": "system", "content": "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."}
+            {"role": "system", "content": system_content}
         ]
         if conversation_history:
             messages.extend(conversation_history)
         messages.append({"role": "user", "content": message})
         
-        # Yield routing info immediately
+        # Yield routing info immediately (including RAG sources)
         yield {
             "type": "start",
             "model": model_tier,
             "model_id": model_id,
-            "complexity": complexity
+            "complexity": complexity,
+            "rag_enabled": use_rag,
+            "sources": sources_used
         }
         
         # Stream from OpenAI

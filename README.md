@@ -13,12 +13,14 @@ A robust AI chat application featuring automatic model selection and complexity 
 - **Modern Interface**: Clean, responsive UI built with Next.js and Tailwind CSS, featuring dark mode support.
 - **Performance Metrics**: Displays model usage, response time, and token consumption for transparency.
 - **Markdown Support**: Full rendering support for code blocks, tables, and formatted text.
+- **RAG (Retrieval Augmented Generation)**: Knowledge base integration with Pinecone vector database for context-aware responses based on your documents.
 
 ## Tech Stack
 
 - **Backend**: Python, FastAPI, OpenAI SDK, Google Auth
 - **Frontend**: TypeScript, Next.js, Tailwind CSS, Lucide React
 - **AI Models**: GPT-5.2, GPT-5-mini, GPT-5-nano
+- **RAG**: Pinecone Vector Database, OpenAI Embeddings (text-embedding-3-small)
 - **Authentication**: Google OAuth 2.0, JWT
 
 ## Prerequisites
@@ -26,6 +28,7 @@ A robust AI chat application featuring automatic model selection and complexity 
 - Python 3.12+
 - Node.js 22.22+
 - OpenAI API Key
+- (Optional) Pinecone API Key for RAG functionality
 - Google Cloud Console account (for OAuth)
 
 ## Installation
@@ -101,6 +104,10 @@ Create a `.env` file in the project root with the following:
 OPENAI_API_KEY=sk-...
 GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
 JWT_SECRET=your_random_jwt_secret_key
+
+# Optional: Pinecone for RAG capabilities
+PINECONE_API_KEY=your_pinecone_api_key
+PINECONE_INDEX_NAME=xeva-knowledge
 ```
 
 Create a `.env.local` file in the `frontend` directory with:
@@ -133,6 +140,58 @@ MAX_TOKENS = {
 | `/api/auth/google` | POST | Authenticate with Google token |
 | `/api/auth/me` | GET | Get current authenticated user |
 | `/api/health` | GET | Health check endpoint |
+| `/api/rag/index` | POST | Index document text into knowledge base |
+| `/api/rag/upload` | POST | Upload and index a document file |
+| `/api/rag/search` | POST | Search the knowledge base |
+| `/api/rag/document/{doc_id}` | DELETE | Delete a document from knowledge base |
+| `/api/rag/stats` | GET | Get knowledge base statistics |
+
+## RAG (Knowledge Base) Usage
+
+### Setting Up Pinecone
+
+1. Create a free account at [Pinecone](https://www.pinecone.io/)
+2. Create a new index with:
+   - **Dimensions**: 1536 (for OpenAI text-embedding-3-small)
+   - **Metric**: Cosine
+3. Copy your API key to the `.env` file
+
+### Indexing Documents
+
+**Via API (text content)**:
+```bash
+curl -X POST http://localhost:8000/api/rag/index \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Your document text here...",
+    "title": "Document Title",
+    "source": "manual"
+  }'
+```
+
+**Via file upload**:
+```bash
+curl -X POST http://localhost:8000/api/rag/upload \
+  -F "file=@document.txt" \
+  -F "title=My Document"
+```
+
+### Searching the Knowledge Base
+
+```bash
+curl -X POST http://localhost:8000/api/rag/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is...", "top_k": 5}'
+```
+
+### Using RAG in Chat
+
+RAG is enabled by default. To disable it for a specific request:
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello", "use_rag": false}'
+```
 
 ## License
 

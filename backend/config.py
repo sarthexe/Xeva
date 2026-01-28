@@ -6,6 +6,21 @@ load_dotenv()
 # OpenAI API
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
+# Pinecone Configuration
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "xeva-knowledge")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "")
+
+# Embedding Configuration
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIMENSION = 1536
+
+# RAG Configuration
+RAG_TOP_K = 5  # Number of chunks to retrieve
+RAG_SIMILARITY_THRESHOLD = 0.7  # Minimum similarity score
+RAG_CHUNK_SIZE = 500  # Characters per chunk
+RAG_CHUNK_OVERLAP = 50  # Overlap between chunks
+
 # Model configurations
 MODELS = {
     "nano": "gpt-5-nano",
