@@ -3,12 +3,23 @@
 import { useState, useRef, useEffect } from 'react'
 import { Message } from '@/app/page'
 import MessageBubble from './MessageBubble'
-import { ArrowUp, Paperclip, Search, Square } from 'lucide-react'
+import { ArrowUp, Paperclip, Search, Square, Loader2, Check, X, FileText } from 'lucide-react'
 
 interface ChatAreaProps {
   messages: Message[]
   onAddMessage: (message: Message) => void
   onNewChat: () => void
+}
+
+// Track uploaded file status
+interface UploadedFile {
+  id: string
+  name: string
+  size: number
+  status: 'uploading' | 'ready' | 'error'
+  error?: string
+  docId?: string
+  chunksIndexed?: number
 }
 
 const RANDOM_PROMPTS = [
@@ -29,8 +40,9 @@ interface InputBoxProps {
   centered?: boolean
   input: string
   setInput: (value: string) => void
-  files: File[]
-  setFiles: React.Dispatch<React.SetStateAction<File[]>>
+  uploadedFiles: UploadedFile[]
+  onFileSelect: (files: FileList) => void
+  onRemoveFile: (id: string) => void
   isLoading: boolean
   onSubmit: (e: React.FormEvent) => void
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
@@ -41,8 +53,9 @@ function InputBox({
   centered = false,
   input,
   setInput,
-  files,
-  setFiles,
+  uploadedFiles,
+  onFileSelect,
+  onRemoveFile,
   isLoading,
   onSubmit,
   textareaRef,
@@ -62,25 +75,46 @@ function InputBox({
     }
   }
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files))
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      onFileSelect(e.target.files)
+      e.target.value = '' // Reset so same file can be selected again
     }
   }
 
-  const removeFile = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index))
-  }
+  const hasUploadingFiles = uploadedFiles.some(f => f.status === 'uploading')
+  const canSubmit = input.trim() && !isLoading && !hasUploadingFiles
 
   return (
     <div className={centered ? 'w-full max-w-2xl mx-auto px-4' : 'w-full'}>
-      {/* File previews with glass effect */}
-      {files.length > 0 && (
+      {/* File previews with status */}
+      {uploadedFiles.length > 0 && (
         <div className="flex gap-2 mb-3 flex-wrap px-1">
-          {files.map((file, i) => (
-            <div key={i} className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800/50 backdrop-blur-md border border-zinc-700/50 rounded-lg text-xs font-medium text-zinc-300 animate-fadeIn shadow-sm">
-              <span className="max-w-[120px] truncate">{file.name}</span>
-              <button onClick={() => removeFile(i)} className="text-zinc-400 hover:text-white transition-colors">
+          {uploadedFiles.map((file) => (
+            <div
+              key={file.id}
+              className={`
+                flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium animate-fadeIn shadow-sm
+                ${file.status === 'error'
+                  ? 'bg-red-900/30 border border-red-700/50 text-red-300'
+                  : file.status === 'ready'
+                    ? 'bg-emerald-900/30 border border-emerald-700/50 text-emerald-300'
+                    : 'bg-zinc-800/50 border border-zinc-700/50 text-zinc-300'
+                }
+              `}
+            >
+              {file.status === 'uploading' && <Loader2 size={12} className="animate-spin" />}
+              {file.status === 'ready' && <Check size={12} />}
+              {file.status === 'error' && <X size={12} />}
+              <FileText size={12} />
+              <span className="max-w-[100px] truncate">{file.name}</span>
+              {file.status === 'ready' && file.chunksIndexed && (
+                <span className="text-emerald-400 text-[10px]">({file.chunksIndexed} chunks)</span>
+              )}
+              <button
+                onClick={() => onRemoveFile(file.id)}
+                className="text-zinc-400 hover:text-white transition-colors ml-1"
+              >
                 ×
               </button>
             </div>
@@ -104,17 +138,19 @@ function InputBox({
             value={input}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder="What can I help with?"
+            placeholder={hasUploadingFiles ? "Uploading files..." : "What can I help with?"}
             rows={1}
-            className="w-full bg-transparent resize-none outline-none text-zinc-900 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 text-lg py-1 max-h-[200px] leading-normal"
+            disabled={hasUploadingFiles}
+            className="w-full bg-transparent resize-none outline-none text-zinc-900 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 text-lg py-1 max-h-[200px] leading-normal disabled:opacity-50"
           />
 
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800/50 rounded-full transition-all duration-200"
-              title="Attach files"
+              disabled={isLoading}
+              className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800/50 rounded-full transition-all duration-200 disabled:opacity-50"
+              title="Attach files (PDF, DOCX, Images, Text)"
             >
               <Paperclip size={20} strokeWidth={2} />
             </button>
@@ -122,8 +158,9 @@ function InputBox({
               ref={fileInputRef}
               type="file"
               multiple
+              accept=".pdf,.docx,.doc,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp"
               className="hidden"
-              onChange={handleFileSelect}
+              onChange={handleFileChange}
             />
 
             {isLoading ? (
@@ -137,15 +174,15 @@ function InputBox({
             ) : (
               <button
                 type="submit"
-                disabled={!input.trim()}
+                disabled={!canSubmit}
                 className={`
                     p-2 rounded-full transition-all duration-200 flex items-center justify-center
-                    ${input.trim()
+                    ${canSubmit
                     ? 'bg-zinc-900 dark:bg-white text-white dark:text-black hover:bg-zinc-700 dark:hover:bg-zinc-200'
                     : 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'}
                   `}
               >
-                {input.trim() ? <ArrowUp size={20} strokeWidth={2.5} /> : <ArrowUp size={20} strokeWidth={2.5} />}
+                <ArrowUp size={20} strokeWidth={2.5} />
               </button>
             )}
 
@@ -159,7 +196,7 @@ function InputBox({
 export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatAreaProps) {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [files, setFiles] = useState<File[]>([])
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [prompts, setPrompts] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -172,21 +209,95 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
     setPrompts(shuffled.slice(0, 3))
   }, [])
 
-  // Removed auto-scroll to prevent content from being pushed above viewport
+  // Upload file immediately when selected
+  const handleFileSelect = async (fileList: FileList) => {
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i]
+      const fileId = `${Date.now()}-${i}`
+
+      // Add to state as uploading
+      const newFile: UploadedFile = {
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        status: 'uploading'
+      }
+      setUploadedFiles(prev => [...prev, newFile])
+
+      // Upload immediately
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('title', file.name)
+        formData.append('source', 'chat-attachment')
+
+        const response = await fetch('http://localhost:8000/api/rag/upload', {
+          method: 'POST',
+          body: formData
+        })
+
+        if (response.ok) {
+          const result = await response.json()
+          console.log(`[Chat] File ${file.name} ready: ${result.chunks_indexed} chunks`)
+          setUploadedFiles(prev => prev.map(f =>
+            f.id === fileId ? {
+              ...f,
+              status: 'ready',
+              docId: result.doc_id,
+              chunksIndexed: result.chunks_indexed
+            } : f
+          ))
+        } else {
+          const error = await response.json()
+          console.error(`[Chat] Upload failed for ${file.name}:`, error.detail)
+          setUploadedFiles(prev => prev.map(f =>
+            f.id === fileId ? { ...f, status: 'error', error: error.detail } : f
+          ))
+        }
+      } catch (err) {
+        console.error(`[Chat] Upload error for ${file.name}:`, err)
+        setUploadedFiles(prev => prev.map(f =>
+          f.id === fileId ? { ...f, status: 'error', error: 'Network error' } : f
+        ))
+      }
+    }
+  }
+
+  const handleRemoveFile = (fileId: string) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== fileId))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
+    const hasUploadingFiles = uploadedFiles.some(f => f.status === 'uploading')
+    if (!input.trim() || isLoading || hasUploadingFiles) return
 
+    // Get ready files for context
+    const readyFiles = uploadedFiles.filter(f => f.status === 'ready')
+    const currentInput = input.trim()
+
+    // Get document IDs from uploaded files for filtering
+    const docIds = readyFiles.map(f => f.docId).filter(Boolean) as string[]
+
+    // Build user display message
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input.trim()
+      content: readyFiles.length > 0
+        ? `📎 ${readyFiles.map(f => f.name).join(', ')}\n\n${currentInput}`
+        : currentInput
+    }
+
+    // Build message for API (include file context info)
+    let apiMessage = currentInput
+    if (readyFiles.length > 0) {
+      const fileInfo = readyFiles.map(f => `[Document: ${f.name}]`).join(', ')
+      apiMessage = `Context: User has uploaded these documents: ${fileInfo}. Please use them to answer the following question.\n\nQuestion: ${currentInput}`
     }
 
     onAddMessage(userMessage)
     setInput('')
-    setFiles([])
+    setUploadedFiles([]) // Clear files after sending
     setIsLoading(true)
 
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -196,8 +307,12 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: userMessage.content,
-          history: messages.map(m => ({ role: m.role, content: m.content }))
+          message: apiMessage,
+          history: messages.map(m => ({ role: m.role, content: m.content })),
+          // Only enable RAG if documents were uploaded in this session
+          use_rag: docIds.length > 0,
+          // Pass document IDs to filter - only search within uploaded docs
+          doc_ids: docIds.length > 0 ? docIds : undefined
         })
       })
 
@@ -211,7 +326,8 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
           model: data.model,
           complexity: data.complexity,
           responseTime: data.response_time_ms,
-          usage: data.usage
+          usage: data.usage,
+          sources: data.sources || []
         })
       } else {
         onAddMessage({
@@ -262,8 +378,9 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
                 centered
                 input={input}
                 setInput={setInput}
-                files={files}
-                setFiles={setFiles}
+                uploadedFiles={uploadedFiles}
+                onFileSelect={handleFileSelect}
+                onRemoveFile={handleRemoveFile}
                 isLoading={isLoading}
                 onSubmit={handleSubmit}
                 textareaRef={textareaRef}
@@ -322,8 +439,9 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
               <InputBox
                 input={input}
                 setInput={setInput}
-                files={files}
-                setFiles={setFiles}
+                uploadedFiles={uploadedFiles}
+                onFileSelect={handleFileSelect}
+                onRemoveFile={handleRemoveFile}
                 isLoading={isLoading}
                 onSubmit={handleSubmit}
                 textareaRef={textareaRef}

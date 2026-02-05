@@ -14,6 +14,7 @@ from pathlib import Path
 from services.openai_service import openai_service
 from services.auth_service import auth_service
 from services.rag_service import rag_service
+from services.document_parser import document_parser
 from config import APP_NAME, APP_VERSION
 
 # Get the project root directory (parent of backend)
@@ -46,6 +47,7 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[dict]] = None
     use_rag: Optional[bool] = True  # Enable/disable RAG for this request
+    doc_ids: Optional[List[str]] = None  # Filter RAG to specific document IDs
 
 
 class ChatResponse(BaseModel):
@@ -106,7 +108,8 @@ async def chat(request: ChatRequest):
     result = await openai_service.chat(
         message=request.message,
         conversation_history=request.history,
-        use_rag=request.use_rag
+        use_rag=request.use_rag,
+        doc_ids=request.doc_ids
     )
     
     return ChatResponse(
@@ -137,7 +140,8 @@ async def chat_stream(request: ChatRequest):
         async for chunk in openai_service.chat_stream(
             message=request.message,
             conversation_history=request.history,
-            use_rag=request.use_rag
+            use_rag=request.use_rag,
+            doc_ids=request.doc_ids
         ):
             yield f"data: {json.dumps(chunk)}\n\n"
     
@@ -256,41 +260,91 @@ async def upload_document(
     source: Optional[str] = Form("upload")
 ):
     """
-    Upload and index a document file (.txt, .md, .json).
+    Upload and index a document file.
     
-    The file content will be extracted, chunked, and indexed.
+    Supported formats:
+    - Text files: .txt, .md, .csv, .json, .xml, .html
+    - PDF documents: .pdf (with OCR fallback for scanned documents)
+    - Word documents: .docx
+    - Images: .png, .jpg, .jpeg, .gif, .bmp, .webp, .tiff (OCR text extraction)
+    
+    The file content will be extracted, chunked, and indexed into the knowledge base.
     """
-    # Validate file type
-    allowed_extensions = [".txt", ".md", ".json", ".csv"]
-    file_ext = "." + file.filename.split(".")[-1].lower() if "." in file.filename else ""
-    
-    if file_ext not in allowed_extensions:
+    # Check if file type is supported
+    if not document_parser.is_supported(file.filename):
+        supported = ", ".join(document_parser.get_supported_extensions())
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
+            detail=f"Unsupported file type. Supported formats: {supported}"
         )
     
     # Read file content
     content = await file.read()
+    
+    # Check file size (max 50MB)
+    max_size = 50 * 1024 * 1024  # 50MB
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size is 50MB."
+        )
+    
+    # Parse the document
     try:
-        text_content = content.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="File must be valid UTF-8 text")
+        text_content, parse_metadata = await document_parser.parse(content, file.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    # Check if any text was extracted
+    if not text_content or len(text_content.strip()) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract meaningful text from the file. "
+                   "For images, ensure they contain readable text. "
+                   "For PDFs, ensure they are not password protected."
+        )
     
     # Use filename as title if not provided
     doc_title = title or file.filename
+    
+    # Merge parse metadata with custom metadata
+    metadata = {
+        **parse_metadata,
+        "original_size_bytes": len(content),
+        "extracted_chars": len(text_content)
+    }
     
     result = await rag_service.index_document(
         content=text_content,
         source=source,
         title=doc_title,
-        metadata={"filename": file.filename, "file_type": file_ext}
+        metadata=metadata
     )
     
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     
+    # Add parser info to response
+    result["parser_used"] = parse_metadata.get("parser_used", "unknown")
+    result["extracted_chars"] = len(text_content)
+    
     return result
+
+
+@app.get("/api/rag/supported-types")
+async def get_supported_file_types():
+    """
+    Get list of supported file types for upload.
+    """
+    return {
+        "supported_extensions": document_parser.get_supported_extensions(),
+        "categories": {
+            "text": document_parser.SUPPORTED_TEXT,
+            "pdf": document_parser.SUPPORTED_PDF if hasattr(document_parser, '_parse_pdf') else [],
+            "documents": document_parser.SUPPORTED_DOCX if hasattr(document_parser, '_parse_docx') else [],
+            "images": document_parser.SUPPORTED_IMAGES if hasattr(document_parser, '_parse_image') else []
+        }
+    }
 
 
 @app.post("/api/rag/search")

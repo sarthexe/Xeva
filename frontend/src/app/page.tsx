@@ -14,6 +14,7 @@ export interface Message {
   complexity?: string
   responseTime?: number
   usage?: { input_tokens: number; output_tokens: number }
+  sources?: string[]
 }
 
 export interface ChatSession {

@@ -1,4 +1,4 @@
-.venv
+/backend/venv
 
 .env
 
@@ -29,5 +29,11 @@
 /frontend/.vercel
 
 
-/backend/__pycache__
-/backend/services/__pycache__ 
+/backend/__pycache__/
+/backend/**/__pycache__/
+/backend/chroma_data/
+*.pyc
+
+# Backend environment variables
+/backend/.env*.local
+/backend/.env

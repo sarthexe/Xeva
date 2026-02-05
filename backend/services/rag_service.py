@@ -275,33 +275,39 @@ class RAGService:
         relevant_chunks = []
         
         if results and results['ids'] and len(results['ids']) > 0:
+            print(f"RAG Search found {len(results['ids'][0])} raw matches for query: '{query[:50]}...'")
             for i, chunk_id in enumerate(results['ids'][0]):
                 # Convert distance to similarity score
                 distance = results['distances'][0][i] if results['distances'] else 0
                 score = 1 - distance  # Cosine similarity = 1 - cosine distance
                 
+                metadata = results['metadatas'][0][i] if results['metadatas'] else {}
+                title = metadata.get("title", "Untitled")
+                print(f"  Match {i+1}: {title} (Score: {score:.4f}, Min: {min_score})")
+                
                 if score >= min_score:
-                    metadata = results['metadatas'][0][i] if results['metadatas'] else {}
                     document = results['documents'][0][i] if results['documents'] else ""
                     
                     relevant_chunks.append({
                         "id": chunk_id,
                         "score": score,
                         "text": document,
-                        "title": metadata.get("title", ""),
+                        "title": title,
                         "source": metadata.get("source", ""),
                         "doc_id": metadata.get("doc_id", ""),
                         "chunk_index": metadata.get("chunk_index", 0),
                         "metadata": metadata
                     })
         
+        print(f"RAG returning {len(relevant_chunks)} filtered chunks")
         return relevant_chunks
     
     async def get_context_for_query(
         self,
         query: str,
         top_k: int = None,
-        max_tokens: int = 2000
+        max_tokens: int = 2000,
+        doc_ids: List[str] = None
     ) -> str:
         """
         Get formatted context string for augmenting LLM prompts.
@@ -310,11 +316,14 @@ class RAGService:
             query: The user's query
             top_k: Number of chunks to retrieve
             max_tokens: Maximum tokens for context (approximate)
+            doc_ids: Optional list of document IDs to filter results
             
         Returns:
             Formatted context string ready to inject into prompts
         """
-        chunks = await self.search(query, top_k=top_k)
+        # Build filter for specific document IDs
+        filter_metadata = {"doc_id": {"$in": doc_ids}} if doc_ids else None
+        chunks = await self.search(query, top_k=top_k, filter_metadata=filter_metadata)
         
         if not chunks:
             return ""

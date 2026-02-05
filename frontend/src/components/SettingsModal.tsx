@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Image from 'next/image'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
+import FileUpload from '@/components/FileUpload'
 import {
     X,
     User,
@@ -21,7 +22,8 @@ import {
     ChevronRight,
     Sparkles,
     Zap,
-    Crown
+    Crown,
+    Database
 } from 'lucide-react'
 
 interface SettingsModalProps {
@@ -30,7 +32,7 @@ interface SettingsModalProps {
     defaultTab?: string
 }
 
-type TabId = 'profile' | 'appearance' | 'notifications' | 'privacy' | 'shortcuts' | 'about'
+type TabId = 'profile' | 'appearance' | 'knowledge' | 'notifications' | 'privacy' | 'shortcuts' | 'about'
 
 interface Tab {
     id: TabId
@@ -41,6 +43,7 @@ interface Tab {
 const tabs: Tab[] = [
     { id: 'profile', label: 'Profile', icon: <User size={18} /> },
     { id: 'appearance', label: 'Appearance', icon: <Palette size={18} /> },
+    { id: 'knowledge', label: 'Knowledge Base', icon: <Database size={18} /> },
     { id: 'notifications', label: 'Notifications', icon: <Bell size={18} /> },
     { id: 'privacy', label: 'Privacy & Data', icon: <Shield size={18} /> },
     { id: 'shortcuts', label: 'Shortcuts', icon: <Keyboard size={18} /> },
@@ -63,7 +66,7 @@ export default function SettingsModal({ isOpen, onClose, defaultTab = 'profile' 
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fadeIn"
+                className="absolute inset-0 bg-black/60 animate-fadeIn"
                 onClick={onClose}
             />
 
@@ -141,6 +144,7 @@ export default function SettingsModal({ isOpen, onClose, defaultTab = 'profile' 
                     <div className="flex-1 overflow-y-auto p-8">
                         {activeTab === 'profile' && <ProfileTab user={user} />}
                         {activeTab === 'appearance' && <AppearanceTab theme={theme} setTheme={setTheme} />}
+                        {activeTab === 'knowledge' && <KnowledgeBaseTab />}
                         {activeTab === 'notifications' && <NotificationsTab />}
                         {activeTab === 'privacy' && <PrivacyTab />}
                         {activeTab === 'shortcuts' && <ShortcutsTab />}
@@ -299,6 +303,45 @@ function AppearanceTab({ theme, setTheme }: { theme: string; setTheme: (t: 'ligh
                         className="flex-1 h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full appearance-none cursor-pointer accent-violet-500"
                     />
                     <span className="text-lg text-zinc-500">Aa</span>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+// Knowledge Base Tab
+function KnowledgeBaseTab() {
+    return (
+        <div className="space-y-8">
+            <div>
+                <h3 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2">Knowledge Base</h3>
+                <p className="text-zinc-500 dark:text-zinc-400">Manage documents and data sources for the AI</p>
+            </div>
+
+            <div className="space-y-4">
+                <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/50 rounded-xl p-4">
+                    <div className="flex items-start gap-3">
+                        <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                            <Sparkles size={20} />
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-blue-900 dark:text-blue-100">Supercharge your AI</h4>
+                            <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                                Upload documents to give the AI context about your specific projects, guidelines, or data.
+                                It will use this knowledge to provide more accurate and relevant answers.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden bg-white dark:bg-zinc-800/50">
+                    <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex items-center justify-between">
+                        <h4 className="font-medium text-zinc-900 dark:text-white">Upload Documents</h4>
+                        <span className="text-xs text-zinc-500">Supports PDF, DOCX, Images & Text</span>
+                    </div>
+                    <div className="p-4">
+                        <FileUpload />
+                    </div>
                 </div>
             </div>
         </div>

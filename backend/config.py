@@ -15,10 +15,10 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSION = 1536
 
 # RAG Configuration
-RAG_TOP_K = 5  # Number of chunks to retrieve
-RAG_SIMILARITY_THRESHOLD = 0.7  # Minimum similarity score
-RAG_CHUNK_SIZE = 500  # Characters per chunk
-RAG_CHUNK_OVERLAP = 50  # Overlap between chunks
+RAG_TOP_K = 10  # Number of chunks to retrieve
+RAG_SIMILARITY_THRESHOLD = 0.3  # Minimum similarity score (lowered for better recall)
+RAG_CHUNK_SIZE = 1000  # Characters per chunk (larger for better context)
+RAG_CHUNK_OVERLAP = 100  # Overlap between chunks
 
 # Model configurations
 MODELS = {

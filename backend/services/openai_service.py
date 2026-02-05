@@ -49,7 +49,8 @@ class OpenAIService:
         self,
         message: str,
         conversation_history: Optional[List[dict]] = None,
-        use_rag: bool = True
+        use_rag: bool = True,
+        doc_ids: Optional[List[str]] = None
     ) -> dict:
         """
         Send a message with automatic model selection and RAG augmentation.
@@ -59,6 +60,7 @@ class OpenAIService:
             message: User message
             conversation_history: Previous conversation turns
             use_rag: Whether to retrieve relevant context from knowledge base
+            doc_ids: Optional list of document IDs to filter RAG search (session-specific)
         """
         start_time = time.time()
         
@@ -74,14 +76,16 @@ class OpenAIService:
         }
         complexity = tier_to_complexity[model_tier]
         
-        # Step 2: Retrieve RAG context if enabled
+        # Step 2: Retrieve RAG context if enabled AND doc_ids provided
         rag_context = ""
         sources_used = []
-        if use_rag:
+        if use_rag and doc_ids:
             try:
-                rag_results = await rag_service.search(message, top_k=5)
+                # Build filter for specific document IDs
+                filter_metadata = {"doc_id": {"$in": doc_ids}} if doc_ids else None
+                rag_results = await rag_service.search(message, top_k=5, filter_metadata=filter_metadata)
                 if rag_results:
-                    rag_context = await rag_service.get_context_for_query(message)
+                    rag_context = await rag_service.get_context_for_query(message, doc_ids=doc_ids)
                     sources_used = list(set([r.get('title', 'Unknown') for r in rag_results]))
             except Exception as e:
                 print(f"RAG retrieval error: {e}")
@@ -89,7 +93,17 @@ class OpenAIService:
         # Step 3: Build messages with RAG context
         system_content = "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."
         if rag_context:
-            system_content += f"\n\nUse the following context from the knowledge base to help answer the user's question. If the context is relevant, incorporate it into your response and cite the sources. If the context isn't relevant, you can ignore it.\n\n{rag_context}"
+            system_content = """You are Xeva, a helpful AI assistant specialized in answering questions based on uploaded documents.
+
+IMPORTANT RULES:
+1. ONLY answer questions using information from the provided document context below. Do not use external knowledge.
+2. If the question cannot be answered from the document context, politely state that the information is not available in the uploaded document(s).
+3. Do NOT ask follow-up questions in your initial response. Provide a complete, helpful answer directly.
+4. When citing information, reference the source document naturally (e.g., "According to the document..." or "The uploaded file states...").
+5. Be concise and professional in your responses.
+
+DOCUMENT CONTEXT:
+""" + rag_context
         
         messages = [
             {"role": "system", "content": system_content}
@@ -135,7 +149,8 @@ class OpenAIService:
         self,
         message: str,
         conversation_history: Optional[List[dict]] = None,
-        use_rag: bool = True
+        use_rag: bool = True,
+        doc_ids: Optional[List[str]] = None
     ) -> AsyncGenerator[dict, None]:
         """
         Stream response chunks for instant perceived response.
@@ -145,6 +160,7 @@ class OpenAIService:
             message: User message
             conversation_history: Previous conversation turns
             use_rag: Whether to retrieve relevant context from knowledge base
+            doc_ids: Optional list of document IDs to filter RAG search (session-specific)
         """
         start_time = time.time()
         
@@ -159,14 +175,16 @@ class OpenAIService:
         }
         complexity = tier_to_complexity[model_tier]
         
-        # Retrieve RAG context if enabled
+        # Retrieve RAG context if enabled AND doc_ids provided
         rag_context = ""
         sources_used = []
-        if use_rag:
+        if use_rag and doc_ids:
             try:
-                rag_results = await rag_service.search(message, top_k=5)
+                # Build filter for specific document IDs
+                filter_metadata = {"doc_id": {"$in": doc_ids}} if doc_ids else None
+                rag_results = await rag_service.search(message, top_k=5, filter_metadata=filter_metadata)
                 if rag_results:
-                    rag_context = await rag_service.get_context_for_query(message)
+                    rag_context = await rag_service.get_context_for_query(message, doc_ids=doc_ids)
                     sources_used = list(set([r.get('title', 'Unknown') for r in rag_results]))
             except Exception as e:
                 print(f"RAG retrieval error: {e}")
@@ -174,7 +192,17 @@ class OpenAIService:
         # Build messages with RAG context
         system_content = "You are Xeva, a helpful AI assistant. Be concise, professional, and helpful."
         if rag_context:
-            system_content += f"\n\nUse the following context from the knowledge base to help answer the user's question. If the context is relevant, incorporate it into your response and cite the sources. If the context isn't relevant, you can ignore it.\n\n{rag_context}"
+            system_content = """You are Xeva, a helpful AI assistant specialized in answering questions based on uploaded documents.
+
+IMPORTANT RULES:
+1. ONLY answer questions using information from the provided document context below. Do not use external knowledge.
+2. If the question cannot be answered from the document context, politely state that the information is not available in the uploaded document(s).
+3. Do NOT ask follow-up questions in your initial response. Provide a complete, helpful answer directly.
+4. When citing information, reference the source document naturally (e.g., "According to the document..." or "The uploaded file states...").
+5. Be concise and professional in your responses.
+
+DOCUMENT CONTEXT:
+""" + rag_context
         
         messages = [
             {"role": "system", "content": system_content}
