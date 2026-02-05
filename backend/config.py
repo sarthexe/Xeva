@@ -6,10 +6,9 @@ load_dotenv()
 # OpenAI API
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-# Pinecone Configuration
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "xeva-knowledge")
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "")
+# ChromaDB Configuration
+CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
+CHROMA_COLLECTION_NAME = os.getenv("CHROMA_COLLECTION_NAME", "xeva-knowledge")
 
 # Embedding Configuration
 EMBEDDING_MODEL = "text-embedding-3-small"

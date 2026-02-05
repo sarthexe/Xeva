@@ -1,9 +1,9 @@
 """
-RAG Service - Retrieval Augmented Generation with Pinecone and OpenAI
+RAG Service - Retrieval Augmented Generation with ChromaDB and OpenAI
 
 This service handles:
 - Document chunking and embedding generation
-- Vector storage in Pinecone
+- Vector storage in ChromaDB (local persistent storage)
 - Semantic search for relevant context retrieval
 - Context augmentation for improved chat responses
 """
@@ -15,12 +15,13 @@ from datetime import datetime
 import tiktoken
 
 from openai import AsyncOpenAI
-from pinecone import Pinecone, ServerlessSpec
+import chromadb
+from chromadb.config import Settings
 
 from config import (
     OPENAI_API_KEY,
-    PINECONE_API_KEY,
-    PINECONE_INDEX_NAME,
+    CHROMA_PERSIST_DIRECTORY,
+    CHROMA_COLLECTION_NAME,
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSION,
     RAG_TOP_K,
@@ -34,13 +35,13 @@ class RAGService:
     """
     RAG Service for document indexing and context retrieval.
     
-    Uses Pinecone for vector storage and OpenAI for embeddings.
+    Uses ChromaDB for vector storage and OpenAI for embeddings.
     """
     
     _instance = None
     _openai_client = None
-    _pinecone_client = None
-    _index = None
+    _chroma_client = None
+    _collection = None
     _initialized = False
     
     def __new__(cls):
@@ -49,35 +50,33 @@ class RAGService:
         return cls._instance
     
     async def initialize(self):
-        """Initialize Pinecone and OpenAI clients."""
+        """Initialize ChromaDB and OpenAI clients."""
         if self._initialized:
             return
         
         # Initialize OpenAI client
         self._openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         
-        # Initialize Pinecone client
-        if PINECONE_API_KEY:
-            self._pinecone_client = Pinecone(api_key=PINECONE_API_KEY)
-            
-            # Check if index exists, create if not
-            existing_indexes = [idx.name for idx in self._pinecone_client.list_indexes()]
-            
-            if PINECONE_INDEX_NAME not in existing_indexes:
-                self._pinecone_client.create_index(
-                    name=PINECONE_INDEX_NAME,
-                    dimension=EMBEDDING_DIMENSION,
-                    metric="cosine",
-                    spec=ServerlessSpec(
-                        cloud="aws",
-                        region="us-east-1"
-                    )
-                )
-            
-            self._index = self._pinecone_client.Index(PINECONE_INDEX_NAME)
-            self._initialized = True
-        else:
-            print("Warning: PINECONE_API_KEY not set. RAG functionality disabled.")
+        # Initialize ChromaDB client with persistent storage
+        self._chroma_client = chromadb.PersistentClient(
+            path=CHROMA_PERSIST_DIRECTORY,
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
+        )
+        
+        # Get or create collection
+        self._collection = self._chroma_client.get_or_create_collection(
+            name=CHROMA_COLLECTION_NAME,
+            metadata={
+                "hnsw:space": "cosine",  # Use cosine similarity
+                "dimension": EMBEDDING_DIMENSION
+            }
+        )
+        
+        self._initialized = True
+        print(f"ChromaDB initialized with collection '{CHROMA_COLLECTION_NAME}'")
     
     def _chunk_text(self, text: str, chunk_size: int = None, overlap: int = None) -> List[str]:
         """
@@ -167,7 +166,7 @@ class RAGService:
         metadata: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
-        Index a document into Pinecone.
+        Index a document into ChromaDB.
         
         Args:
             content: The document text content
@@ -181,8 +180,8 @@ class RAGService:
         if not self._initialized:
             await self.initialize()
         
-        if not self._index:
-            return {"error": "Pinecone not initialized. Check PINECONE_API_KEY."}
+        if not self._collection:
+            return {"error": "ChromaDB not initialized."}
         
         # Generate document ID
         doc_id = self._generate_doc_id(content, metadata)
@@ -193,39 +192,35 @@ class RAGService:
         if not chunks:
             return {"error": "No content to index"}
         
-        # Generate embeddings for all chunks
+        # Generate embeddings for all chunks using OpenAI
         embeddings = await self.generate_embeddings(chunks)
         
-        # Prepare vectors for Pinecone
-        vectors = []
+        # Prepare data for ChromaDB
         chunk_ids = []
+        metadatas = []
         
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+        for i, chunk in enumerate(chunks):
             chunk_id = f"{doc_id}_{i}"
             chunk_ids.append(chunk_id)
             
-            vector_metadata = {
+            chunk_metadata = {
                 "doc_id": doc_id,
                 "chunk_index": i,
                 "total_chunks": len(chunks),
-                "text": chunk,  # Store text for retrieval
                 "source": source,
                 "title": title or "Untitled",
                 "indexed_at": datetime.utcnow().isoformat(),
                 **(metadata or {})
             }
-            
-            vectors.append({
-                "id": chunk_id,
-                "values": embedding,
-                "metadata": vector_metadata
-            })
+            metadatas.append(chunk_metadata)
         
-        # Upsert to Pinecone (batch of 100 max)
-        batch_size = 100
-        for i in range(0, len(vectors), batch_size):
-            batch = vectors[i:i + batch_size]
-            self._index.upsert(vectors=batch)
+        # Upsert to ChromaDB
+        self._collection.upsert(
+            ids=chunk_ids,
+            embeddings=embeddings,
+            documents=chunks,
+            metadatas=metadatas
+        )
         
         return {
             "success": True,
@@ -249,7 +244,7 @@ class RAGService:
         Args:
             query: The search query
             top_k: Number of results to return
-            filter_metadata: Optional Pinecone metadata filter
+            filter_metadata: Optional ChromaDB metadata filter
             min_score: Minimum similarity score threshold
             
         Returns:
@@ -258,37 +253,47 @@ class RAGService:
         if not self._initialized:
             await self.initialize()
         
-        if not self._index:
+        if not self._collection:
             return []
         
         top_k = top_k or RAG_TOP_K
         min_score = min_score or RAG_SIMILARITY_THRESHOLD
         
-        # Generate query embedding
+        # Generate query embedding using OpenAI
         query_embedding = await self.generate_embedding(query)
         
-        # Search in Pinecone
-        results = self._index.query(
-            vector=query_embedding,
-            top_k=top_k,
-            include_metadata=True,
-            filter=filter_metadata
+        # Search in ChromaDB
+        results = self._collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            include=["documents", "metadatas", "distances"],
+            where=filter_metadata
         )
         
-        # Filter by minimum score and format results
+        # Convert distances to similarity scores and format results
+        # ChromaDB returns cosine distances, convert to similarity (1 - distance)
         relevant_chunks = []
-        for match in results.matches:
-            if match.score >= min_score:
-                relevant_chunks.append({
-                    "id": match.id,
-                    "score": match.score,
-                    "text": match.metadata.get("text", ""),
-                    "title": match.metadata.get("title", ""),
-                    "source": match.metadata.get("source", ""),
-                    "doc_id": match.metadata.get("doc_id", ""),
-                    "chunk_index": match.metadata.get("chunk_index", 0),
-                    "metadata": match.metadata
-                })
+        
+        if results and results['ids'] and len(results['ids']) > 0:
+            for i, chunk_id in enumerate(results['ids'][0]):
+                # Convert distance to similarity score
+                distance = results['distances'][0][i] if results['distances'] else 0
+                score = 1 - distance  # Cosine similarity = 1 - cosine distance
+                
+                if score >= min_score:
+                    metadata = results['metadatas'][0][i] if results['metadatas'] else {}
+                    document = results['documents'][0][i] if results['documents'] else ""
+                    
+                    relevant_chunks.append({
+                        "id": chunk_id,
+                        "score": score,
+                        "text": document,
+                        "title": metadata.get("title", ""),
+                        "source": metadata.get("source", ""),
+                        "doc_id": metadata.get("doc_id", ""),
+                        "chunk_index": metadata.get("chunk_index", 0),
+                        "metadata": metadata
+                    })
         
         return relevant_chunks
     
@@ -346,46 +351,50 @@ class RAGService:
         if not self._initialized:
             await self.initialize()
         
-        if not self._index:
-            return {"error": "Pinecone not initialized"}
+        if not self._collection:
+            return {"error": "ChromaDB not initialized"}
         
         # Delete by metadata filter
-        self._index.delete(filter={"doc_id": {"$eq": doc_id}})
+        self._collection.delete(
+            where={"doc_id": {"$eq": doc_id}}
+        )
         
         return {"success": True, "deleted_doc_id": doc_id}
     
-    async def list_documents(self) -> List[Dict[str, Any]]:
+    async def list_documents(self) -> Dict[str, Any]:
         """List all indexed documents (unique doc_ids with metadata)."""
         if not self._initialized:
             await self.initialize()
         
-        if not self._index:
-            return []
+        if not self._collection:
+            return {}
         
-        # Get index stats
-        stats = self._index.describe_index_stats()
+        # Get collection count
+        count = self._collection.count()
         
         return {
-            "total_vectors": stats.total_vector_count,
-            "index_name": PINECONE_INDEX_NAME,
-            "dimension": EMBEDDING_DIMENSION
+            "total_vectors": count,
+            "collection_name": CHROMA_COLLECTION_NAME,
+            "dimension": EMBEDDING_DIMENSION,
+            "persist_directory": CHROMA_PERSIST_DIRECTORY
         }
     
     async def get_stats(self) -> Dict[str, Any]:
-        """Get Pinecone index statistics."""
+        """Get ChromaDB collection statistics."""
         if not self._initialized:
             await self.initialize()
         
-        if not self._index:
-            return {"error": "Pinecone not initialized"}
+        if not self._collection:
+            return {"error": "ChromaDB not initialized"}
         
-        stats = self._index.describe_index_stats()
+        count = self._collection.count()
         
         return {
-            "total_vectors": stats.total_vector_count,
-            "index_name": PINECONE_INDEX_NAME,
+            "total_vectors": count,
+            "collection_name": CHROMA_COLLECTION_NAME,
             "dimension": EMBEDDING_DIMENSION,
-            "embedding_model": EMBEDDING_MODEL
+            "embedding_model": EMBEDDING_MODEL,
+            "persist_directory": CHROMA_PERSIST_DIRECTORY
         }
 
 
