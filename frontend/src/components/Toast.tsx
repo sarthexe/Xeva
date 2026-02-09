@@ -19,8 +19,9 @@ const ToastContext = createContext<ToastContextType | null>(null)
 
 export function useToast() {
     const context = useContext(ToastContext)
+    // Return a no-op if context is not available (SSR or before provider mounts)
     if (!context) {
-        throw new Error('useToast must be used within a ToastProvider')
+        return { showToast: () => { } }
     }
     return context
 }

@@ -254,7 +254,7 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEdit, o
             h1: ({ node, ...props }) => <h1 className="text-xl font-semibold mt-5 mb-3 text-zinc-900 dark:text-zinc-100 underline decoration-zinc-300 dark:decoration-zinc-700 underline-offset-4" {...props} />,
             h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-4 mb-2 text-zinc-900 dark:text-zinc-100 underline decoration-zinc-300 dark:decoration-zinc-700 underline-offset-4" {...props} />,
             h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-3 mb-2 text-zinc-900 dark:text-zinc-100" {...props} />,
-            p: ({ node, ...props }) => <p className="mb-3 text-[15px] text-zinc-700 dark:text-zinc-300 leading-[1.7]" {...props} />,
+            p: ({ node, ...props }) => <div className="mb-3 text-[15px] text-zinc-700 dark:text-zinc-300 leading-[1.7]" {...props} />,
             strong: ({ node, ...props }) => <strong className="font-semibold text-zinc-900 dark:text-zinc-100" {...props} />,
             ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1 text-zinc-700 dark:text-zinc-300" {...props} />,
             li: ({ node, ...props }) => <li className="text-[15px] leading-[1.7]" {...props} />,
