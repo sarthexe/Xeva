@@ -210,6 +210,7 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showExportModal, setShowExportModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -222,11 +223,24 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (messagesContainerRef.current) {
+      const { scrollHeight, clientHeight } = messagesContainerRef.current
+      messagesContainerRef.current.scrollTo({
+        top: scrollHeight - clientHeight,
+        behavior: 'smooth'
+      })
+    }
   }
 
   useEffect(() => {
-    scrollToBottom()
+    // Immediate scroll on first load/layout change to prevent jump
+    if (messages.length === 1 && isLoading) {
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+      }
+    } else {
+      scrollToBottom()
+    }
   }, [messages, isLoading])
 
   // Global keyboard shortcuts
@@ -560,7 +574,10 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto bg-white dark:bg-[#09090b] scroll-smooth relative z-0">
+          <div
+            ref={messagesContainerRef}
+            className="flex-1 overflow-y-auto bg-white dark:bg-[#09090b] scroll-smooth relative z-0"
+          >
             <div className="max-w-3xl mx-auto px-4 pt-20 pb-32 space-y-6">
               {/* Top padding 10 ensures breathable top space. Bottom padding 40 allows scroll past the floating input */}
 
