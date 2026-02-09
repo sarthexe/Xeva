@@ -50,6 +50,53 @@ function getFileTypeColors(filename: string) {
   return 'from-zinc-500/20 to-zinc-600/10 border-zinc-500/30 hover:border-zinc-400/50'
 }
 
+const CodeBlock = ({ inline, className, children, ...props }: any) => {
+  const [copied, setCopied] = useState(false)
+  const { showToast } = useToast()
+
+  const handleCodeCopy = () => {
+    // Get text content from children (which is the code string)
+    const code = String(children).replace(/\n$/, '')
+    navigator.clipboard.writeText(code)
+    setCopied(true)
+    showToast('Code copied to clipboard', 'success')
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  if (inline) {
+    return (
+      <code className="bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-sm font-mono text-zinc-800 dark:text-zinc-200" {...props}>
+        {children}
+      </code>
+    )
+  }
+
+  return (
+    <div className="my-4 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0a0a0a] group/code w-full">
+      <div className="flex items-center justify-between px-4 py-2 bg-zinc-100 dark:bg-zinc-900/80 border-b border-zinc-200 dark:border-zinc-800">
+        <span className="text-xs text-zinc-500 font-mono">
+          {className?.replace('language-', '') || 'text'}
+        </span>
+        <button
+          onClick={handleCodeCopy}
+          className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white flex items-center gap-1.5 transition-colors"
+          title="Copy code"
+        >
+          {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <div className="relative w-full">
+        <pre className="p-4 overflow-x-auto text-sm text-zinc-800 dark:text-zinc-300 font-mono leading-relaxed whitespace-pre w-full scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700">
+          <code className={className} {...props}>
+            {children}
+          </code>
+        </pre>
+      </div>
+    </div>
+  )
+}
+
 export default function MessageBubble({ message, isLast, onRegenerate, onEdit, onReaction }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
@@ -251,35 +298,29 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEdit, o
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            h1: ({ node, ...props }) => <h1 className="text-xl font-semibold mt-5 mb-3 text-zinc-900 dark:text-zinc-100 underline decoration-zinc-300 dark:decoration-zinc-700 underline-offset-4" {...props} />,
-            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-4 mb-2 text-zinc-900 dark:text-zinc-100 underline decoration-zinc-300 dark:decoration-zinc-700 underline-offset-4" {...props} />,
-            h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-3 mb-2 text-zinc-900 dark:text-zinc-100" {...props} />,
-            p: ({ node, ...props }) => <div className="mb-3 text-[15px] text-zinc-700 dark:text-zinc-300 leading-[1.7]" {...props} />,
+            h1: ({ node, ...props }) => <h1 className="text-2xl font-bold mt-6 mb-4 text-zinc-900 dark:text-zinc-100 tracking-tight" {...props} />,
+            h2: ({ node, ...props }) => <h2 className="text-xl font-semibold mt-5 mb-3 text-zinc-900 dark:text-zinc-100 tracking-tight" {...props} />,
+            h3: ({ node, ...props }) => <h3 className="text-lg font-semibold mt-4 mb-2 text-zinc-900 dark:text-zinc-100" {...props} />,
+            p: ({ node, ...props }) => <div className="mb-4 text-[15px] text-zinc-700 dark:text-zinc-300 leading-relaxed" {...props} />,
             strong: ({ node, ...props }) => <strong className="font-semibold text-zinc-900 dark:text-zinc-100" {...props} />,
-            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1 text-zinc-700 dark:text-zinc-300" {...props} />,
-            li: ({ node, ...props }) => <li className="text-[15px] leading-[1.7]" {...props} />,
-            a: ({ node, ...props }) => <a className="text-blue-600 dark:text-zinc-400 hover:text-blue-800 dark:hover:text-zinc-200 underline decoration-blue-300 dark:decoration-zinc-600 underline-offset-2" {...props} />,
-            code({ node, inline, className, children, ...props }: any) {
-              return !inline ? (
-                <div className="my-3 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0a0a0a]">
-                  <div className="flex items-center justify-between px-4 py-2 bg-zinc-100 dark:bg-zinc-900/80 border-b border-zinc-200 dark:border-zinc-800">
-                    <span className="text-xs text-zinc-500 font-mono">code</span>
-                    <button onClick={handleCopy} className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white flex items-center gap-1 transition-colors">
-                      <Copy size={12} /> {copied ? 'Copied!' : 'Copy'}
-                    </button>
-                  </div>
-                  <pre className="p-4 overflow-x-auto text-sm text-zinc-800 dark:text-zinc-300 font-mono leading-relaxed">
-                    <code className={className} {...props}>
-                      {children}
-                    </code>
-                  </pre>
-                </div>
-              ) : (
-                <code className="bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-sm font-mono text-zinc-800 dark:text-zinc-200" {...props}>
-                  {children}
-                </code>
-              )
-            }
+            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-4 space-y-1.5 text-zinc-700 dark:text-zinc-300 marker:text-zinc-400" {...props} />,
+            ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-4 space-y-1.5 text-zinc-700 dark:text-zinc-300 marker:text-zinc-400" {...props} />,
+            li: ({ node, ...props }) => <li className="pl-1 text-[15px] leading-relaxed" {...props} />,
+            a: ({ node, ...props }) => <a className="text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 underline decoration-violet-300 dark:decoration-violet-700/50 underline-offset-2 transition-colors font-medium" {...props} />,
+            blockquote: ({ node, ...props }) => (
+              <blockquote className="my-4 pl-4 border-l-4 border-violet-500/50 italic text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900/50 py-2 pr-4 rounded-r-lg" {...props} />
+            ),
+            table: ({ node, ...props }) => (
+              <div className="my-5 overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                <table className="w-full text-sm text-left border-collapse" {...props} />
+              </div>
+            ),
+            thead: ({ node, ...props }) => <thead className="bg-zinc-50 dark:bg-zinc-900/80 text-zinc-700 dark:text-zinc-300 font-semibold border-b border-zinc-200 dark:border-zinc-800" {...props} />,
+            tbody: ({ node, ...props }) => <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 bg-white dark:bg-zinc-950/50" {...props} />,
+            tr: ({ node, ...props }) => <tr className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors" {...props} />,
+            th: ({ node, ...props }) => <th className="px-4 py-3 text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-medium whitespace-nowrap" {...props} />,
+            td: ({ node, ...props }) => <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap" {...props} />,
+            code: CodeBlock
           }}
         >
           {message.content}
