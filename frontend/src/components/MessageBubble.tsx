@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm'
 import { Copy, FileText, File, Image, FileType, ThumbsUp, ThumbsDown, RefreshCw, Pencil, Check, X } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useToast } from './Toast'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 interface MessageBubbleProps {
   message: Message
@@ -54,6 +56,9 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
   const [copied, setCopied] = useState(false)
   const { showToast } = useToast()
 
+  const match = /language-(\w+)/.exec(className || '')
+  const language = match ? match[1] : ''
+
   const handleCodeCopy = () => {
     // Get text content from children (which is the code string)
     const code = String(children).replace(/\n$/, '')
@@ -72,10 +77,10 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
   }
 
   return (
-    <div className="my-4 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0a0a0a] group/code w-full">
-      <div className="flex items-center justify-between px-4 py-2 bg-zinc-100 dark:bg-zinc-900/80 border-b border-zinc-200 dark:border-zinc-800">
+    <div className="my-4 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#1e1e1e] group/code w-full shadow-sm">
+      <div className="flex items-center justify-between px-4 py-2 bg-zinc-100 dark:bg-[#252526] border-b border-zinc-200 dark:border-zinc-800">
         <span className="text-xs text-zinc-500 font-mono">
-          {className?.replace('language-', '') || 'text'}
+          {language || 'text'}
         </span>
         <button
           onClick={handleCodeCopy}
@@ -86,12 +91,27 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
           {copied ? 'Copied!' : 'Copy'}
         </button>
       </div>
-      <div className="relative w-full">
-        <pre className="p-4 overflow-x-auto text-sm text-zinc-800 dark:text-zinc-300 font-mono leading-relaxed whitespace-pre w-full scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700">
-          <code className={className} {...props}>
-            {children}
-          </code>
-        </pre>
+      <div className="relative w-full text-sm">
+        <SyntaxHighlighter
+          style={vscDarkPlus}
+          language={language}
+          PreTag="div"
+          customStyle={{
+            margin: 0,
+            padding: '1rem',
+            background: 'transparent',
+            fontSize: '0.9rem',
+            lineHeight: '1.5',
+          }}
+          codeTagProps={{
+            style: {
+              fontFamily: "'JetBrains Mono', monospace",
+            }
+          }}
+          {...props}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
       </div>
     </div>
   )
