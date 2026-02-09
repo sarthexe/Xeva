@@ -220,6 +220,15 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
     setPrompts(shuffled.slice(0, 3))
   }, [])
 
+  // Auto-scroll to bottom
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, isLoading])
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
