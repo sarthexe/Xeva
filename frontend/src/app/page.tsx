@@ -15,6 +15,7 @@ export interface Message {
   responseTime?: number
   usage?: { input_tokens: number; output_tokens: number }
   sources?: string[]
+  reaction?: 'up' | 'down' | null
 }
 
 export interface ChatSession {
@@ -72,6 +73,33 @@ export default function Home() {
     }))
   }
 
+  const handleUpdateMessage = (messageId: string, updates: Partial<Message>) => {
+    if (!currentChatId) return
+
+    setChats(prev => prev.map(chat => {
+      if (chat.id === currentChatId) {
+        const updatedMessages = chat.messages.map(msg =>
+          msg.id === messageId ? { ...msg, ...updates } : msg
+        )
+        return { ...chat, messages: updatedMessages }
+      }
+      return chat
+    }))
+  }
+
+  const handleRemoveMessagesAfter = (messageId: string) => {
+    if (!currentChatId) return
+
+    setChats(prev => prev.map(chat => {
+      if (chat.id === currentChatId) {
+        const messageIndex = chat.messages.findIndex(m => m.id === messageId)
+        if (messageIndex === -1) return chat
+        return { ...chat, messages: chat.messages.slice(0, messageIndex + 1) }
+      }
+      return chat
+    }))
+  }
+
   const handleSwitchChat = (id: string) => {
     setCurrentChatId(id)
   }
@@ -107,7 +135,10 @@ export default function Home() {
           <ChatArea
             key={currentChat.id} // Force remount on chat switch to reset scroll/input
             messages={currentChat.messages}
+            chatTitle={currentChat.title}
             onAddMessage={handleAddMessage}
+            onUpdateMessage={handleUpdateMessage}
+            onRemoveMessagesAfter={handleRemoveMessagesAfter}
             onNewChat={handleNewChat}
           />
         )}

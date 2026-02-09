@@ -3,11 +3,15 @@
 import { useState, useRef, useEffect } from 'react'
 import { Message } from '@/app/page'
 import MessageBubble from './MessageBubble'
+import ChatExport from './ChatExport'
 import { ArrowUp, Paperclip, Search, Square, Loader2, Check, X, FileText } from 'lucide-react'
 
 interface ChatAreaProps {
   messages: Message[]
+  chatTitle: string
   onAddMessage: (message: Message) => void
+  onUpdateMessage: (messageId: string, updates: Partial<Message>) => void
+  onRemoveMessagesAfter: (messageId: string) => void
   onNewChat: () => void
 }
 
@@ -69,7 +73,12 @@ function InputBox({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Enter sends, Shift+Enter for new line, Ctrl+Enter also sends
     if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onSubmit(e)
+    }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       onSubmit(e)
     }
@@ -193,11 +202,13 @@ function InputBox({
   )
 }
 
-export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatAreaProps) {
+export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMessage, onRemoveMessagesAfter, onNewChat }: ChatAreaProps) {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [prompts, setPrompts] = useState<string[]>([])
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
+  const [showExportModal, setShowExportModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -208,6 +219,124 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
     const shuffled = [...RANDOM_PROMPTS].sort(() => 0.5 - Math.random())
     setPrompts(shuffled.slice(0, 3))
   }, [])
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // '/' to focus input when not already focused
+      if (e.key === '/' && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
+        e.preventDefault()
+        textareaRef.current?.focus()
+      }
+      // Escape to clear input
+      if (e.key === 'Escape' && document.activeElement === textareaRef.current) {
+        setInput('')
+        textareaRef.current?.blur()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Handle regenerate response
+  const handleRegenerate = async (messageId: string) => {
+    // Find the message and the user message before it
+    const messageIndex = messages.findIndex(m => m.id === messageId)
+    if (messageIndex < 1) return
+
+    const userMessage = messages[messageIndex - 1]
+    if (userMessage.role !== 'user') return
+
+    setRegeneratingId(messageId)
+    setIsLoading(true)
+
+    try {
+      // Get history up to but not including the user message
+      const history = messages.slice(0, messageIndex - 1).map(m => ({ role: m.role, content: m.content }))
+
+      const response = await fetch('http://localhost:8000/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userMessage.content,
+          history,
+          use_rag: false
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        onUpdateMessage(messageId, {
+          content: data.response,
+          model: data.model,
+          complexity: data.complexity,
+          responseTime: data.response_time_ms,
+          usage: data.usage,
+          sources: data.sources || [],
+          reaction: null
+        })
+      }
+    } catch (error) {
+      console.error('Regenerate failed:', error)
+    }
+
+    setRegeneratingId(null)
+    setIsLoading(false)
+  }
+
+  // Handle edit user message
+  const handleEdit = async (messageId: string, newContent: string) => {
+    const messageIndex = messages.findIndex(m => m.id === messageId)
+    if (messageIndex === -1) return
+
+    // Update the message content
+    onUpdateMessage(messageId, { content: newContent })
+
+    // Remove all messages after this one
+    onRemoveMessagesAfter(messageId)
+
+    // Re-submit
+    setIsLoading(true)
+
+    try {
+      const history = messages.slice(0, messageIndex).map(m => ({ role: m.role, content: m.content }))
+
+      const response = await fetch('http://localhost:8000/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: newContent,
+          history,
+          use_rag: false
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        onAddMessage({
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: data.response,
+          model: data.model,
+          complexity: data.complexity,
+          responseTime: data.response_time_ms,
+          usage: data.usage,
+          sources: data.sources || []
+        })
+      }
+    } catch (error) {
+      console.error('Edit submission failed:', error)
+    }
+
+    setIsLoading(false)
+  }
+
+  // Handle reaction
+  const handleReaction = (messageId: string, reaction: 'up' | 'down' | null) => {
+    onUpdateMessage(messageId, { reaction })
+  }
 
   // Upload file immediately when selected
   const handleFileSelect = async (fileList: FileList) => {
@@ -412,6 +541,16 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
       ) : (
         /* CONVERSATION LAYOUT */
         <>
+          {/* Header with export button */}
+          <div className="fixed top-0 left-[6.5rem] right-0 z-10 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-sm border-b border-zinc-100 dark:border-zinc-800/50">
+            <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+              <h1 className="text-sm font-medium text-zinc-600 dark:text-zinc-400 truncate max-w-md">
+                {chatTitle}
+              </h1>
+              <ChatExport messages={messages} chatTitle={chatTitle} />
+            </div>
+          </div>
+
           <div className="flex-1 overflow-y-auto bg-white dark:bg-[#09090b] scroll-smooth relative z-0">
             <div className="max-w-3xl mx-auto px-4 pt-20 pb-32 space-y-6">
               {/* Top padding 10 ensures breathable top space. Bottom padding 40 allows scroll past the floating input */}
@@ -419,8 +558,11 @@ export default function ChatArea({ messages, onAddMessage, onNewChat }: ChatArea
               {messages.map((message, index) => (
                 <MessageBubble
                   key={message.id}
-                  message={message}
+                  message={regeneratingId === message.id ? { ...message, content: 'Regenerating...' } : message}
                   isLast={index === messages.length - 1}
+                  onRegenerate={message.role === 'assistant' ? handleRegenerate : undefined}
+                  onEdit={message.role === 'user' ? handleEdit : undefined}
+                  onReaction={message.role === 'assistant' ? handleReaction : undefined}
                 />
               ))}
 

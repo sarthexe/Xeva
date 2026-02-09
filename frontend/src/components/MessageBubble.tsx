@@ -3,12 +3,16 @@
 import { Message } from '@/app/page'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Copy, FileText, File, Image, FileType } from 'lucide-react'
-import { useState } from 'react'
+import { Copy, FileText, File, Image, FileType, ThumbsUp, ThumbsDown, RefreshCw, Pencil, Check, X } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { useToast } from './Toast'
 
 interface MessageBubbleProps {
   message: Message
   isLast?: boolean
+  onRegenerate?: (messageId: string) => void
+  onEdit?: (messageId: string, newContent: string) => void
+  onReaction?: (messageId: string, reaction: 'up' | 'down' | null) => void
 }
 
 // Helper to parse attached files from message content
@@ -46,21 +50,141 @@ function getFileTypeColors(filename: string) {
   return 'from-zinc-500/20 to-zinc-600/10 border-zinc-500/30 hover:border-zinc-400/50'
 }
 
-export default function MessageBubble({ message, isLast }: MessageBubbleProps) {
+export default function MessageBubble({ message, isLast, onRegenerate, onEdit, onReaction }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editContent, setEditContent] = useState('')
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const { showToast } = useToast()
+
+  // Auto-resize edit textarea
+  useEffect(() => {
+    if (isEditing && editTextareaRef.current) {
+      editTextareaRef.current.style.height = 'auto'
+      editTextareaRef.current.style.height = editTextareaRef.current.scrollHeight + 'px'
+      editTextareaRef.current.focus()
+    }
+  }, [isEditing, editContent])
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content)
     setCopied(true)
+    showToast('Copied to clipboard', 'success')
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleStartEdit = () => {
+    const { text } = parseAttachedFiles(message.content)
+    setEditContent(text)
+    setIsEditing(true)
+  }
+
+  const handleCancelEdit = () => {
+    setIsEditing(false)
+    setEditContent('')
+  }
+
+  const handleSaveEdit = () => {
+    if (editContent.trim() && onEdit) {
+      onEdit(message.id, editContent.trim())
+    }
+    setIsEditing(false)
+    setEditContent('')
+  }
+
+  const handleReaction = (reaction: 'up' | 'down') => {
+    if (!onReaction) return
+    // Toggle off if same reaction clicked
+    if (message.reaction === reaction) {
+      onReaction(message.id, null)
+    } else {
+      onReaction(message.id, reaction)
+    }
   }
 
   if (isUser) {
     const { files, text } = parseAttachedFiles(message.content)
 
+    // Edit mode
+    if (isEditing) {
+      return (
+        <div className="flex items-start gap-3 animate-fadeIn mb-2">
+          <div className="w-7 h-7 rounded-full bg-[#8b6d5c] flex items-center justify-center flex-shrink-0 text-white font-medium text-xs">
+            S
+          </div>
+          <div className="flex-1 space-y-3">
+            {/* Attached Documents Display */}
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {files.map((fileName, index) => (
+                  <div
+                    key={index}
+                    className={`
+                      group flex items-center gap-2.5 px-3 py-2 rounded-xl
+                      bg-gradient-to-br ${getFileTypeColors(fileName)}
+                      border backdrop-blur-sm opacity-60
+                    `}
+                  >
+                    <div className="p-1.5 rounded-lg bg-black/10 backdrop-blur-sm">
+                      {getFileIcon(fileName)}
+                    </div>
+                    <span className="text-sm font-medium text-zinc-100 truncate max-w-[180px]">
+                      {fileName}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Edit Textarea */}
+            <div className="space-y-2">
+              <textarea
+                ref={editTextareaRef}
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault()
+                    handleSaveEdit()
+                  }
+                  if (e.key === 'Escape') {
+                    handleCancelEdit()
+                  }
+                }}
+                className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 
+                  rounded-xl px-4 py-3 text-base text-zinc-900 dark:text-zinc-200 
+                  focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500
+                  resize-none min-h-[60px] transition-all"
+                placeholder="Edit your message..."
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={handleCancelEdit}
+                  className="px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 
+                    transition-colors flex items-center gap-1.5"
+                >
+                  <X size={14} />
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={!editContent.trim()}
+                  className="px-4 py-1.5 text-sm bg-violet-600 hover:bg-violet-700 text-white rounded-lg 
+                    transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Check size={14} />
+                  Save & Submit
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
-      <div className="flex items-start gap-3 animate-fadeIn mb-2">
+      <div className="group flex items-start gap-3 animate-fadeIn mb-2">
         <div className="w-7 h-7 rounded-full bg-[#8b6d5c] flex items-center justify-center flex-shrink-0 text-white font-medium text-xs">
           S
         </div>
@@ -96,16 +220,32 @@ export default function MessageBubble({ message, isLast }: MessageBubbleProps) {
           )}
 
           {/* Text Content */}
-          <p className="text-base text-zinc-900 dark:text-zinc-200 leading-relaxed">
-            {text}
-          </p>
+          <div className="flex items-start gap-2">
+            <p className="text-base text-zinc-900 dark:text-zinc-200 leading-relaxed flex-1">
+              {text}
+            </p>
+
+            {/* Edit button - appears on hover */}
+            {onEdit && (
+              <button
+                onClick={handleStartEdit}
+                className="opacity-0 group-hover:opacity-100 p-1.5 text-zinc-400 hover:text-zinc-600 
+                  dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg 
+                  transition-all duration-200"
+                title="Edit message"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     )
   }
 
+  // Assistant message
   return (
-    <div className="flex flex-col animate-fadeIn space-y-3 mb-4">
+    <div className="group flex flex-col animate-fadeIn space-y-3 mb-4">
       {/* Answer Content - Clean Text */}
       <div className="prose dark:prose-invert max-w-none text-zinc-700 dark:text-zinc-300 leading-relaxed">
         <ReactMarkdown
@@ -144,6 +284,59 @@ export default function MessageBubble({ message, isLast }: MessageBubbleProps) {
         >
           {message.content}
         </ReactMarkdown>
+      </div>
+
+      {/* Actions Bar - appears on hover */}
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        {/* Reactions */}
+        <div className="flex items-center gap-0.5 mr-2">
+          <button
+            onClick={() => handleReaction('up')}
+            className={`p-1.5 rounded-lg transition-all duration-200 ${message.reaction === 'up'
+              ? 'bg-emerald-500/20 text-emerald-500'
+              : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            title="Good response"
+          >
+            <ThumbsUp size={14} fill={message.reaction === 'up' ? 'currentColor' : 'none'} />
+          </button>
+          <button
+            onClick={() => handleReaction('down')}
+            className={`p-1.5 rounded-lg transition-all duration-200 ${message.reaction === 'down'
+              ? 'bg-red-500/20 text-red-500'
+              : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            title="Poor response"
+          >
+            <ThumbsDown size={14} fill={message.reaction === 'down' ? 'currentColor' : 'none'} />
+          </button>
+        </div>
+
+        <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-700 mx-1" />
+
+        {/* Copy */}
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-700 
+            dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
+          title="Copy response"
+        >
+          <Copy size={14} />
+          <span>{copied ? 'Copied!' : 'Copy'}</span>
+        </button>
+
+        {/* Regenerate */}
+        {onRegenerate && (
+          <button
+            onClick={() => onRegenerate(message.id)}
+            className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-700 
+              dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
+            title="Regenerate response"
+          >
+            <RefreshCw size={14} />
+            <span>Retry</span>
+          </button>
+        )}
       </div>
 
       {/* Sources Section - Beautiful Card Design */}
