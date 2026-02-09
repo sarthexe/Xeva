@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Message } from '@/app/page'
+import type { Message } from '@/app/page'
 import MessageBubble from './MessageBubble'
 import ChatExport from './ChatExport'
 import { ArrowUp, Paperclip, Search, Square, Loader2, Check, X, FileText } from 'lucide-react'

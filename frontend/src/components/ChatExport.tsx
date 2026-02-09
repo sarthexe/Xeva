@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Download, FileJson, FileText, X } from 'lucide-react'
-import { Message } from '@/app/page'
+import type { Message } from '@/app/page'
 
 interface ChatExportProps {
     messages: Message[]

@@ -1,6 +1,6 @@
 'use client'
 
-import { Message } from '@/app/page'
+import type { Message } from '@/app/page'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Copy, FileText, File, Image, FileType, ThumbsUp, ThumbsDown, RefreshCw, Pencil, Check, X } from 'lucide-react'
