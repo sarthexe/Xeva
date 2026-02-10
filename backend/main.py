@@ -15,6 +15,7 @@ from services.openai_service import openai_service
 from services.auth_service import auth_service
 from services.rag_service import rag_service
 from services.document_parser import document_parser
+from database import database
 from config import APP_NAME, APP_VERSION
 
 # Get the project root directory (parent of backend)
@@ -80,6 +81,57 @@ class GoogleAuthRequest(BaseModel):
 class AuthResponse(BaseModel):
     token: str
     user: dict
+
+
+class CreateChatRequest(BaseModel):
+    id: str
+    title: Optional[str] = "New Chat"
+
+
+class UpdateChatRequest(BaseModel):
+    title: str
+
+
+class AddMessageRequest(BaseModel):
+    id: str
+    role: str
+    content: str
+    model: Optional[str] = None
+    complexity: Optional[str] = None
+    responseTime: Optional[int] = None
+    usage: Optional[dict] = None
+    sources: Optional[List[str]] = None
+    reaction: Optional[str] = None
+
+
+class UpdateMessageRequest(BaseModel):
+    content: Optional[str] = None
+    reaction: Optional[str] = None
+    model: Optional[str] = None
+    complexity: Optional[str] = None
+    responseTime: Optional[int] = None
+    usage: Optional[dict] = None
+    sources: Optional[List[str]] = None
+
+
+class DeleteMessagesAfterRequest(BaseModel):
+    after_message_id: str
+
+
+async def get_user_id_from_request(request: Request) -> str:
+    """Extract user_id from JWT token in the Authorization header."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = auth_header.split(" ")[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload["sub"]
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -179,7 +231,7 @@ async def google_auth(request: GoogleAuthRequest):
         )
     
     # Get or create the user
-    user = auth_service.get_or_create_user(google_user)
+    user = await auth_service.get_or_create_user(google_user)
     
     # Create JWT token
     expiration = datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
@@ -214,7 +266,7 @@ async def get_current_user(request: Request):
     
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user = auth_service.get_user_by_id(payload["sub"])
+        user = await auth_service.get_user_by_id(payload["sub"])
         
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
@@ -390,9 +442,99 @@ async def get_rag_stats():
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize RAG service on startup."""
+    """Initialize database and RAG service on startup."""
+    try:
+        await database.initialize()
+        print("✅ Database initialized successfully")
+    except Exception as e:
+        print(f"❌ Database initialization failed: {e}")
+    
     try:
         await rag_service.initialize()
         print("✅ RAG Service initialized successfully")
     except Exception as e:
         print(f"⚠️ RAG Service initialization warning: {e}")
+
+
+# ==================== Chat History Endpoints ====================
+
+@app.get("/api/chats")
+async def list_chats(request: Request):
+    """List all chats for the authenticated user."""
+    user_id = await get_user_id_from_request(request)
+    chats = await database.get_chats(user_id)
+    
+    # Transform to frontend format
+    result = []
+    for chat in chats:
+        result.append({
+            "id": chat["id"],
+            "title": chat["title"],
+            "createdAt": chat["created_at"],
+            "messages": chat.get("messages", [])
+        })
+    return result
+
+
+@app.post("/api/chats")
+async def create_chat(request: Request, body: CreateChatRequest):
+    """Create a new chat session."""
+    user_id = await get_user_id_from_request(request)
+    chat = await database.create_chat(body.id, user_id, body.title)
+    return {
+        "id": chat["id"],
+        "title": chat["title"],
+        "createdAt": chat["created_at"],
+        "messages": []
+    }
+
+
+@app.put("/api/chats/{chat_id}")
+async def update_chat(chat_id: str, request: Request, body: UpdateChatRequest):
+    """Update a chat's title."""
+    user_id = await get_user_id_from_request(request)
+    chat = await database.update_chat(chat_id, user_id, body.title)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"id": chat["id"], "title": chat["title"]}
+
+
+@app.delete("/api/chats/{chat_id}")
+async def delete_chat(chat_id: str, request: Request):
+    """Delete a chat and all its messages."""
+    user_id = await get_user_id_from_request(request)
+    deleted = await database.delete_chat(chat_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"deleted": True}
+
+
+@app.post("/api/chats/{chat_id}/messages")
+async def add_message(chat_id: str, request: Request, body: AddMessageRequest):
+    """Add a message to a chat."""
+    user_id = await get_user_id_from_request(request)
+    
+    message_data = body.model_dump(exclude_none=True)
+    result = await database.add_message(chat_id, message_data)
+    return result
+
+
+@app.put("/api/chats/{chat_id}/messages/{message_id}")
+async def update_message(chat_id: str, message_id: str, request: Request, body: UpdateMessageRequest):
+    """Update a message (content, reaction, etc)."""
+    await get_user_id_from_request(request)
+    
+    updates = body.model_dump(exclude_none=True)
+    updated = await database.update_message(message_id, chat_id, updates)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"updated": True}
+
+
+@app.post("/api/chats/{chat_id}/messages/delete-after")
+async def delete_messages_after(chat_id: str, request: Request, body: DeleteMessagesAfterRequest):
+    """Delete all messages after a given message in a chat."""
+    await get_user_id_from_request(request)
+    
+    count = await database.delete_messages_after(chat_id, body.after_message_id)
+    return {"deleted_count": count}

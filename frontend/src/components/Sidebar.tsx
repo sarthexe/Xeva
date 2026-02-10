@@ -16,7 +16,8 @@ import {
   Gift,
   ChevronDown,
   Menu,
-  LogOut
+  LogOut,
+  Trash2
 } from 'lucide-react'
 
 import { useTheme } from '@/components/ThemeProvider'
@@ -28,6 +29,7 @@ interface SidebarProps {
   chats: ChatSession[]
   currentChatId: string | null
   onSwitchChat: (id: string) => void
+  onDeleteChat?: (id: string) => void
 }
 
 export default function Sidebar({
@@ -35,6 +37,7 @@ export default function Sidebar({
   chats,
   currentChatId,
   onSwitchChat,
+  onDeleteChat,
 }: SidebarProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -158,18 +161,31 @@ export default function Sidebar({
                 <div className="mb-2 px-1 text-xs font-bold text-zinc-500 uppercase tracking-wider">Today</div>
                 <div className="space-y-1">
                   {chats.map(chat => (
-                    <button
+                    <div
                       key={chat.id}
-                      onClick={() => onSwitchChat(chat.id)}
                       className={`
-                      w-full text-left px-3 py-2 rounded-lg text-sm truncate transition-colors
+                      group/chat relative flex items-center w-full rounded-lg text-sm transition-colors
                       ${chat.id === currentChatId
                           ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-bold'
                           : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 font-semibold'}
                     `}
                     >
-                      {chat.title}
-                    </button>
+                      <button
+                        onClick={() => onSwitchChat(chat.id)}
+                        className="flex-1 text-left px-3 py-2 truncate"
+                      >
+                        {chat.title}
+                      </button>
+                      {onDeleteChat && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id); }}
+                          className="hidden group-hover/chat:flex items-center justify-center p-1.5 mr-1 rounded-md text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                          title="Delete chat"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>

@@ -41,6 +41,9 @@ MAX_TOKENS = {
     "full": 16384
 }
 
+# Database
+DATABASE_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "xeva.db"))
+
 # App settings
 APP_NAME = "Xeva"
 APP_VERSION = "1.0.0"

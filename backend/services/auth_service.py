@@ -1,5 +1,6 @@
 """
 Authentication service for Google OAuth verification.
+Uses SQLite database for persistent user storage.
 """
 import os
 from typing import Optional
@@ -7,12 +8,11 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 from dotenv import load_dotenv
 
+from database import database
+
 load_dotenv()
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-
-# In-memory user storage (replace with database in production)
-users_db: dict = {}
 
 
 class AuthService:
@@ -57,9 +57,10 @@ class AuthService:
             print(f"Token verification failed: {e}")
             return None
     
-    def get_or_create_user(self, google_user_info: dict) -> dict:
+    async def get_or_create_user(self, google_user_info: dict) -> dict:
         """
         Get existing user or create a new one from Google user info.
+        Persists to SQLite database.
         
         Args:
             google_user_info: User info from Google token verification
@@ -69,30 +70,20 @@ class AuthService:
         """
         google_id = google_user_info["google_id"]
         
-        if google_id in users_db:
-            # Update existing user info
-            users_db[google_id].update({
-                "email": google_user_info["email"],
-                "name": google_user_info["name"],
-                "picture": google_user_info["picture"]
-            })
-            return users_db[google_id]
-        
-        # Create new user
-        user = {
+        user_data = {
             "id": google_id,
-            "google_id": google_id,
             "email": google_user_info["email"],
             "name": google_user_info["name"],
             "picture": google_user_info["picture"],
-            "email_verified": google_user_info["email_verified"]
+            "email_verified": google_user_info.get("email_verified", False)
         }
-        users_db[google_id] = user
+        
+        user = await database.upsert_user(user_data)
         return user
     
-    def get_user_by_id(self, user_id: str) -> Optional[dict]:
-        """Get a user by their ID."""
-        return users_db.get(user_id)
+    async def get_user_by_id(self, user_id: str) -> Optional[dict]:
+        """Get a user by their ID from the database."""
+        return await database.get_user(user_id)
 
 
 # Singleton instance
