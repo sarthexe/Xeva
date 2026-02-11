@@ -8,7 +8,6 @@ Optimizations:
 """
 
 import time
-import json
 from typing import List, Optional, AsyncGenerator
 import httpx
 from openai import AsyncOpenAI
@@ -225,17 +224,26 @@ DOCUMENT CONTEXT:
         stream = await self._client.chat.completions.create(
             model=model_id,
             messages=messages,
-            stream=True
+            stream=True,
+            stream_options={"include_usage": True}
         )
-        
-        total_tokens = 0
+
+        finish_reason = None
+        usage = None
         async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
-                total_tokens += 1  # Approximate
-                yield {
-                    "type": "content",
-                    "text": content
+            if chunk.choices:
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                if choice.delta and choice.delta.content:
+                    yield {
+                        "type": "content",
+                        "text": choice.delta.content
+                    }
+            if chunk.usage:
+                usage = {
+                    "input_tokens": chunk.usage.prompt_tokens,
+                    "output_tokens": chunk.usage.completion_tokens
                 }
         
         # Final stats
@@ -243,7 +251,9 @@ DOCUMENT CONTEXT:
         yield {
             "type": "done",
             "response_time_ms": int((end_time - start_time) * 1000),
-            "model": model_tier
+            "model": model_tier,
+            "finish_reason": finish_reason,
+            "usage": usage
         }
 
 

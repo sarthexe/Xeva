@@ -106,3 +106,119 @@ export async function suggestTitleAndFollowups(
     if (!res.ok) return { title: message.slice(0, 30), followups: [] }
     return res.json()
 }
+
+// ==================== Streaming Chat ====================
+
+export interface ChatStreamRequest {
+    message: string
+    history?: { role: string; content: string }[]
+    use_rag?: boolean
+    doc_ids?: string[]
+}
+
+export type ChatStreamEvent =
+    | { type: 'thinking' }
+    | {
+        type: 'start'
+        model: string
+        model_id?: string
+        complexity: string
+        rag_enabled?: boolean
+        sources?: string[]
+    }
+    | { type: 'content'; text: string }
+    | {
+        type: 'done'
+        response_time_ms: number
+        model?: string
+        finish_reason?: string
+        usage?: { input_tokens: number; output_tokens: number }
+    }
+    | {
+        type: 'suggestions'
+        title?: string
+        followups?: string[]
+    }
+    | { type: 'error'; message: string }
+
+function parseSSEEvent(rawEvent: string): ChatStreamEvent | null {
+    const lines = rawEvent.split(/\r?\n/)
+    const dataLines = lines
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+
+    if (dataLines.length === 0) return null
+
+    const payload = dataLines.join('\n')
+    if (!payload) return null
+    if (payload === '[DONE]') {
+        return { type: 'done', response_time_ms: 0 }
+    }
+
+    try {
+        return JSON.parse(payload) as ChatStreamEvent
+    } catch {
+        return null
+    }
+}
+
+export async function streamChat(
+    request: ChatStreamRequest,
+    options: {
+        onEvent: (event: ChatStreamEvent) => void
+        signal?: AbortSignal
+    }
+): Promise<void> {
+    const token = getToken()
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    }
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+    }
+
+    const res = await fetch(`${API_URL}/api/chat/stream`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request),
+        signal: options.signal,
+    })
+
+    if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `Streaming failed (${res.status})`)
+    }
+
+    if (!res.body) {
+        throw new Error('Streaming response body is missing')
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        let boundaryMatch = buffer.match(/\r?\n\r?\n/)
+        while (boundaryMatch) {
+            const boundaryIndex = boundaryMatch.index ?? -1
+            if (boundaryIndex < 0) break
+
+            const rawEvent = buffer.slice(0, boundaryIndex)
+            buffer = buffer.slice(boundaryIndex + boundaryMatch[0].length)
+
+            const event = parseSSEEvent(rawEvent)
+            if (event) options.onEvent(event)
+
+            boundaryMatch = buffer.match(/\r?\n\r?\n/)
+        }
+    }
+
+    buffer += decoder.decode()
+    const trailingEvent = parseSSEEvent(buffer)
+    if (trailingEvent) options.onEvent(trailingEvent)
+}

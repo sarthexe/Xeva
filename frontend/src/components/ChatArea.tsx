@@ -12,7 +12,7 @@ interface ChatAreaProps {
   chatId: string
   chatTitle: string
   onAddMessage: (message: Message) => void
-  onUpdateMessage: (messageId: string, updates: Partial<Message>) => void
+  onUpdateMessage: (messageId: string, updates: Partial<Message>, options?: { persist?: boolean }) => void
   onRemoveMessagesAfter: (messageId: string) => void
   onUpdateTitle: (title: string) => void
   onNewChat: () => void
@@ -42,6 +42,51 @@ const RANDOM_PROMPTS = [
   "Draft a professional email"
 ]
 
+const DEFAULT_FOLLOWUPS = [
+  "Can you explain that more simply?",
+  "What are the key takeaways?",
+  "What should I do next?"
+]
+
+function getTopicFromQuestion(question: string): string {
+  const cleaned = question
+    .replace(/^Context:\s*User has uploaded[\s\S]*?Question:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!cleaned) return 'this topic'
+
+  const words = cleaned.split(' ')
+  return words.slice(0, 8).join(' ')
+}
+
+function buildFallbackFollowups(question: string): string[] {
+  const q = question.toLowerCase()
+  const topic = getTopicFromQuestion(question)
+
+  if (q.includes('code') || q.includes('bug') || q.includes('error') || q.includes('debug')) {
+    return [
+      `Can you break ${topic} into implementation steps?`,
+      `Can you show a minimal example for ${topic}?`,
+      `What edge cases should I test for ${topic}?`
+    ]
+  }
+
+  if (q.includes('write') || q.includes('draft') || q.includes('email')) {
+    return [
+      `Can you rewrite ${topic} in a shorter tone?`,
+      `Can you create 3 alternatives for ${topic}?`,
+      `What style works best for ${topic}?`
+    ]
+  }
+
+  return DEFAULT_FOLLOWUPS.map((template, index) => {
+    if (index === 0) return `Can you go deeper into ${topic}?`
+    if (index === 1) return `What should I do next for ${topic}?`
+    return `What tradeoffs should I consider for ${topic}?`
+  })
+}
+
 // Input Box Component
 interface InputBoxProps {
   centered?: boolean
@@ -51,6 +96,7 @@ interface InputBoxProps {
   onFileSelect: (files: FileList) => void
   onRemoveFile: (id: string) => void
   isLoading: boolean
+  onStop?: () => void
   onSubmit: (e: React.FormEvent) => void
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   fileInputRef: React.RefObject<HTMLInputElement | null>
@@ -64,6 +110,7 @@ function InputBox({
   onFileSelect,
   onRemoveFile,
   isLoading,
+  onStop,
   onSubmit,
   textareaRef,
   fileInputRef
@@ -178,10 +225,11 @@ function InputBox({
             {isLoading ? (
               <button
                 type="button"
-                disabled
-                className="p-2 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                onClick={onStop}
+                className="p-2 text-zinc-500 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                title="Stop generation"
               >
-                <Square size={20} fill="currentColor" strokeWidth={0} className="animate-pulse" />
+                <Square size={20} fill="currentColor" strokeWidth={0} />
               </button>
             ) : (
               <button
@@ -206,17 +254,17 @@ function InputBox({
 }
 
 export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, onUpdateMessage, onRemoveMessagesAfter, onUpdateTitle, onNewChat }: ChatAreaProps) {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [prompts, setPrompts] = useState<string[]>([])
-  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
-  const [showExportModal, setShowExportModal] = useState(false)
   const [followupQuestions, setFollowupQuestions] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const streamAbortRef = useRef<AbortController | null>(null)
 
   const hasMessages = messages.length > 0 || isLoading
 
@@ -265,61 +313,239 @@ export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, on
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  useEffect(() => {
+    return () => {
+      streamAbortRef.current?.abort()
+    }
+  }, [])
+
+  const toHistory = (items: Message[]) => items.map(m => ({ role: m.role, content: m.content }))
+
+  const stopStreaming = () => {
+    streamAbortRef.current?.abort()
+  }
+
+  const applySuggestions = (question: string, response: string, canUpdateTitle: boolean) => {
+    api.suggestTitleAndFollowups(question, response)
+      .then(({ title, followups }) => {
+        const cleaned = (followups || [])
+          .map(q => q.trim())
+          .filter(Boolean)
+          .slice(0, 3)
+
+        if (canUpdateTitle && chatTitle === 'New Chat' && title) {
+          onUpdateTitle(title)
+        }
+
+        if (cleaned.length > 0) {
+          setFollowupQuestions(cleaned)
+          return
+        }
+
+        setFollowupQuestions(buildFallbackFollowups(question))
+      })
+      .catch(err => {
+        console.error('Suggest failed:', err)
+        setFollowupQuestions(buildFallbackFollowups(question))
+      })
+  }
+
+  const applyStreamOrFallbackSuggestions = (
+    result: { title?: string; followups: string[]; content: string },
+    question: string,
+    canUpdateTitle: boolean
+  ) => {
+    if (canUpdateTitle && chatTitle === 'New Chat' && result.title) {
+      onUpdateTitle(result.title)
+    }
+
+    if (result.followups.length > 0) {
+      setFollowupQuestions(result.followups)
+      return
+    }
+
+    applySuggestions(question, result.content, canUpdateTitle)
+  }
+
+  const streamAssistantResponse = async ({
+    assistantMessageId,
+    message,
+    history,
+    useRag,
+    docIds,
+    resetReaction = false
+  }: {
+    assistantMessageId: string
+    message: string
+    history: { role: 'user' | 'assistant'; content: string }[]
+    useRag: boolean
+    docIds?: string[]
+    resetReaction?: boolean
+  }): Promise<{
+    content: string
+    aborted: boolean
+    failed: boolean
+    title?: string
+    followups: string[]
+  }> => {
+    setIsLoading(true)
+
+    const controller = new AbortController()
+    streamAbortRef.current = controller
+
+    const startedAt = Date.now()
+    let content = ''
+    let model: string | undefined
+    let complexity: string | undefined
+    let sources: string[] = []
+    let usage: { input_tokens: number; output_tokens: number } | undefined
+    let responseTime = 0
+    let finishReason: string | undefined
+    let suggestionTitle: string | undefined
+    let suggestionFollowups: string[] = []
+    let streamError: string | null = null
+    let aborted = false
+
+    onUpdateMessage(
+      assistantMessageId,
+      {
+        content: '',
+        model: undefined,
+        complexity: undefined,
+        responseTime: undefined,
+        usage: undefined,
+        sources: [],
+        reaction: resetReaction ? null : undefined
+      },
+      { persist: false }
+    )
+
+    try {
+      await api.streamChat(
+        {
+          message,
+          history,
+          use_rag: useRag,
+          doc_ids: docIds && docIds.length > 0 ? docIds : undefined
+        },
+        {
+          signal: controller.signal,
+          onEvent: (event) => {
+            if (event.type === 'start') {
+              model = event.model
+              complexity = event.complexity
+              sources = event.sources || []
+              onUpdateMessage(
+                assistantMessageId,
+                {
+                  model,
+                  complexity,
+                  sources
+                },
+                { persist: false }
+              )
+              return
+            }
+
+            if (event.type === 'content') {
+              content += event.text
+              onUpdateMessage(assistantMessageId, { content }, { persist: false })
+              return
+            }
+
+            if (event.type === 'done') {
+              responseTime = event.response_time_ms || 0
+              if (event.model) model = event.model
+              if (event.finish_reason) finishReason = event.finish_reason
+              if (event.usage) usage = event.usage
+              return
+            }
+
+            if (event.type === 'error') {
+              streamError = event.message
+              return
+            }
+
+            if (event.type === 'suggestions') {
+              suggestionTitle = event.title
+              suggestionFollowups = (event.followups || [])
+                .map(q => q.trim())
+                .filter(Boolean)
+                .slice(0, 3)
+            }
+          }
+        }
+      )
+    } catch (error) {
+      aborted = error instanceof DOMException && error.name === 'AbortError'
+      if (!aborted) {
+        streamError = error instanceof Error ? error.message : 'Streaming failed'
+      }
+    } finally {
+      if (streamAbortRef.current === controller) {
+        streamAbortRef.current = null
+      }
+    }
+
+    let finalContent = content
+    if (!finalContent) {
+      if (aborted) {
+        finalContent = 'Generation stopped.'
+      } else if (streamError) {
+        finalContent = `Error: ${streamError}`
+      } else if (finishReason === 'content_filter') {
+        finalContent = "I'm unable to help with that request."
+      } else if (finishReason === 'length') {
+        finalContent = '[Response truncated due to length limit]'
+      } else {
+        finalContent = 'No response generated.'
+      }
+    }
+    const finalResponseTime = responseTime || (Date.now() - startedAt)
+
+    onUpdateMessage(
+      assistantMessageId,
+      {
+        content: finalContent,
+        model,
+        complexity,
+        responseTime: finalResponseTime,
+        usage,
+        sources,
+        ...(resetReaction ? { reaction: null } : {})
+      }
+    )
+
+    setIsLoading(false)
+
+    return {
+      content: finalContent,
+      aborted,
+      failed: !aborted && !!streamError,
+      title: suggestionTitle,
+      followups: suggestionFollowups
+    }
+  }
+
   // Handle regenerate response
   const handleRegenerate = async (messageId: string) => {
-    // Find the message and the user message before it
     const messageIndex = messages.findIndex(m => m.id === messageId)
     if (messageIndex < 1) return
 
     const userMessage = messages[messageIndex - 1]
     if (userMessage.role !== 'user') return
 
-    setRegeneratingId(messageId)
-    setIsLoading(true)
+    const result = await streamAssistantResponse({
+      assistantMessageId: messageId,
+      message: userMessage.content,
+      history: toHistory(messages.slice(0, messageIndex - 1)),
+      useRag: false,
+      resetReaction: true
+    })
 
-    try {
-      // Get history up to but not including the user message
-      const history = messages.slice(0, messageIndex - 1).map(m => ({ role: m.role, content: m.content }))
-
-      const response = await fetch('http://localhost:8000/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage.content,
-          history,
-          use_rag: false
-        })
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        onUpdateMessage(messageId, {
-          content: data.response,
-          model: data.model,
-          complexity: data.complexity,
-          responseTime: data.response_time_ms,
-          usage: data.usage,
-          sources: data.sources || [],
-          reaction: null
-        })
-
-        // Generate suggestions if this is the last message
-        if (messageIndex === messages.length - 1) {
-          api.suggestTitleAndFollowups(userMessage.content, data.response)
-            .then(({ title, followups }) => {
-              if (chatTitle === 'New Chat' && title) onUpdateTitle(title)
-              if (followups && followups.length > 0) setFollowupQuestions(followups)
-            })
-            .catch(err => console.error('Regenerate suggest failed:', err))
-        }
-      }
-    } catch (error) {
-      console.error('Regenerate failed:', error)
+    if (!result.aborted && !result.failed && messageIndex === messages.length - 1) {
+      applyStreamOrFallbackSuggestions(result, userMessage.content, true)
     }
-
-    setRegeneratingId(null)
-    setIsLoading(false)
   }
 
   // Handle edit user message
@@ -327,55 +553,27 @@ export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, on
     const messageIndex = messages.findIndex(m => m.id === messageId)
     if (messageIndex === -1) return
 
-    // Update the message content
     onUpdateMessage(messageId, { content: newContent })
-
-    // Remove all messages after this one
     onRemoveMessagesAfter(messageId)
+    setFollowupQuestions([])
 
-    // Re-submit
-    setIsLoading(true)
+    const assistantMessageId = (Date.now() + 1).toString()
+    onAddMessage({
+      id: assistantMessageId,
+      role: 'assistant',
+      content: ''
+    })
 
-    try {
-      const history = messages.slice(0, messageIndex).map(m => ({ role: m.role, content: m.content }))
+    const result = await streamAssistantResponse({
+      assistantMessageId,
+      message: newContent,
+      history: toHistory(messages.slice(0, messageIndex)),
+      useRag: false
+    })
 
-      const response = await fetch('http://localhost:8000/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: newContent,
-          history,
-          use_rag: false
-        })
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        onAddMessage({
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: data.response,
-          model: data.model,
-          complexity: data.complexity,
-          responseTime: data.response_time_ms,
-          usage: data.usage,
-          sources: data.sources || []
-        })
-
-        // Generate suggestions
-        api.suggestTitleAndFollowups(newContent, data.response)
-          .then(({ title, followups }) => {
-            if (chatTitle === 'New Chat' && title) onUpdateTitle(title)
-            if (followups && followups.length > 0) setFollowupQuestions(followups)
-          })
-          .catch(err => console.error('Edit suggest failed:', err))
-      }
-    } catch (error) {
-      console.error('Edit submission failed:', error)
+    if (!result.aborted && !result.failed) {
+      applyStreamOrFallbackSuggestions(result, newContent, true)
     }
-
-    setIsLoading(false)
   }
 
   // Handle reaction
@@ -405,7 +603,7 @@ export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, on
         formData.append('title', file.name)
         formData.append('source', 'chat-attachment')
 
-        const response = await fetch('http://localhost:8000/api/rag/upload', {
+        const response = await fetch(`${API_URL}/api/rag/upload`, {
           method: 'POST',
           body: formData
         })
@@ -473,133 +671,59 @@ export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, on
     setInput('')
     setUploadedFiles([]) // Clear files after sending
     setFollowupQuestions([]) // Clear follow-ups when sending new message
-    setIsLoading(true)
 
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
 
-    try {
-      const response = await fetch('http://localhost:8000/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: apiMessage,
-          history: messages.map(m => ({ role: m.role, content: m.content })),
-          // Only enable RAG if documents were uploaded in this session
-          use_rag: docIds.length > 0,
-          // Pass document IDs to filter - only search within uploaded docs
-          doc_ids: docIds.length > 0 ? docIds : undefined
-        })
-      })
+    const assistantMessageId = (Date.now() + 1).toString()
+    onAddMessage({
+      id: assistantMessageId,
+      role: 'assistant',
+      content: ''
+    })
 
-      const data = await response.json()
+    const result = await streamAssistantResponse({
+      assistantMessageId,
+      message: apiMessage,
+      history: toHistory(messages),
+      useRag: docIds.length > 0,
+      docIds
+    })
 
-      if (response.ok) {
-        const assistantContent = data.response
-        onAddMessage({
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: assistantContent,
-          model: data.model,
-          complexity: data.complexity,
-          responseTime: data.response_time_ms,
-          usage: data.usage,
-          sources: data.sources || []
-        })
-
-        // Fire suggest API in parallel (non-blocking) for title + follow-ups
-        api.suggestTitleAndFollowups(currentInput, assistantContent)
-          .then(({ title, followups }) => {
-            // Only update title if it's still 'New Chat'
-            if (chatTitle === 'New Chat' && title) {
-              onUpdateTitle(title)
-            }
-            if (followups && followups.length > 0) {
-              setFollowupQuestions(followups)
-            }
-          })
-          .catch(err => console.error('Suggest failed:', err))
-      } else {
-        onAddMessage({
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `Error: ${data.detail || 'Something went wrong.'}`,
-        })
-      }
-    } catch {
-      onAddMessage({
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'Unable to connect to server.',
-      })
+    if (!result.aborted && !result.failed) {
+      applyStreamOrFallbackSuggestions(result, currentInput, true)
     }
-
-    setIsLoading(false)
   }
 
-  // Handle follow-up chip click — auto-fill and submit
-  const handleFollowupClick = (question: string) => {
-    setInput(question)
-    // Use setTimeout to ensure setState has flushed before we submit
-    setTimeout(() => {
-      const fakeEvent = { preventDefault: () => { } } as React.FormEvent
-      // Directly call submit logic with the question
-      const submitFollowup = async () => {
-        const userMessage: Message = {
-          id: Date.now().toString(),
-          role: 'user',
-          content: question
-        }
-        onAddMessage(userMessage)
-        setInput('')
-        setFollowupQuestions([])
-        setIsLoading(true)
+  // Handle follow-up chip click
+  const handleFollowupClick = async (question: string) => {
+    if (isLoading) return
 
-        try {
-          const response = await fetch('http://localhost:8000/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: question,
-              history: [...messages, userMessage].map(m => ({ role: m.role, content: m.content })),
-              use_rag: false
-            })
-          })
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: question
+    }
+    onAddMessage(userMessage)
+    setInput('')
+    setFollowupQuestions([])
 
-          const data = await response.json()
+    const assistantMessageId = (Date.now() + 1).toString()
+    onAddMessage({
+      id: assistantMessageId,
+      role: 'assistant',
+      content: ''
+    })
 
-          if (response.ok) {
-            onAddMessage({
-              id: (Date.now() + 1).toString(),
-              role: 'assistant',
-              content: data.response,
-              model: data.model,
-              complexity: data.complexity,
-              responseTime: data.response_time_ms,
-              usage: data.usage,
-              sources: data.sources || []
-            })
+    const result = await streamAssistantResponse({
+      assistantMessageId,
+      message: question,
+      history: toHistory(messages),
+      useRag: false
+    })
 
-            // Get new follow-ups for the new response
-            api.suggestTitleAndFollowups(question, data.response)
-              .then(({ followups }) => {
-                if (followups && followups.length > 0) {
-                  setFollowupQuestions(followups)
-                }
-              })
-              .catch(err => console.error('Suggest failed:', err))
-          }
-        } catch {
-          onAddMessage({
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: 'Unable to connect to server.',
-          })
-        }
-
-        setIsLoading(false)
-      }
-      submitFollowup()
-    }, 0)
+    if (!result.aborted && !result.failed) {
+      applyStreamOrFallbackSuggestions(result, question, false)
+    }
   }
 
   return (
@@ -637,6 +761,7 @@ export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, on
                 onFileSelect={handleFileSelect}
                 onRemoveFile={handleRemoveFile}
                 isLoading={isLoading}
+                onStop={stopStreaming}
                 onSubmit={handleSubmit}
                 textareaRef={textareaRef}
                 fileInputRef={fileInputRef}
@@ -687,7 +812,7 @@ export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, on
               {messages.map((message, index) => (
                 <MessageBubble
                   key={message.id}
-                  message={regeneratingId === message.id ? { ...message, content: 'Regenerating...' } : message}
+                  message={message}
                   isLast={index === messages.length - 1}
                   onRegenerate={message.role === 'assistant' ? handleRegenerate : undefined}
                   onEdit={message.role === 'user' ? handleEdit : undefined}
@@ -749,6 +874,7 @@ export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, on
                 onFileSelect={handleFileSelect}
                 onRemoveFile={handleRemoveFile}
                 isLoading={isLoading}
+                onStop={stopStreaming}
                 onSubmit={handleSubmit}
                 textareaRef={textareaRef}
                 fileInputRef={fileInputRef}

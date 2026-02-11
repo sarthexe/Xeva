@@ -118,7 +118,11 @@ export default function Home() {
     }
   }, [currentChatId, isGuest])
 
-  const handleUpdateMessage = useCallback((messageId: string, updates: Partial<Message>) => {
+  const handleUpdateMessage = useCallback((
+    messageId: string,
+    updates: Partial<Message>,
+    options?: { persist?: boolean }
+  ) => {
     if (!currentChatId) return
 
     setChats(prev => prev.map(chat => {
@@ -132,7 +136,7 @@ export default function Home() {
     }))
 
     // Persist update to API (non-guest)
-    if (!isGuest) {
+    if (!isGuest && options?.persist !== false) {
       api.updateMessage(currentChatId, messageId, updates).catch(err =>
         console.error('Failed to update message:', err)
       )

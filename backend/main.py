@@ -182,27 +182,211 @@ async def chat(request: ChatRequest):
     )
 
 
+def _topic_from_message(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    cleaned = re.sub(r"(?is)^context:\s*user has uploaded[\s\S]*?question:\s*", "", cleaned).strip()
+    if not cleaned:
+        return "this topic"
+    words = cleaned.split()
+    topic = " ".join(words[:8])
+    return topic[:80].strip()
+
+
+def _normalize_followups(items: Any) -> List[str]:
+    if not isinstance(items, list):
+        return []
+
+    normalized: List[str] = []
+    seen = set()
+    for item in items:
+        q = str(item).strip().strip('"').strip("'")
+        q = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", q)
+        q = re.sub(r"\s+", " ", q).strip()
+        if len(q) < 8:
+            continue
+        if not q.endswith("?"):
+            q = f"{q}?"
+        key = q.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(q)
+        if len(normalized) == 3:
+            break
+    return normalized
+
+
+def _fallback_followups(text: str) -> List[str]:
+    topic = _topic_from_message(text)
+    t = (text or "").lower()
+
+    if any(k in t for k in ["code", "bug", "error", "debug"]):
+        return [
+            f"Can you break {topic} into concrete implementation steps?",
+            f"Can you show a minimal working example for {topic}?",
+            f"What edge cases should I test first for {topic}?"
+        ]
+    if any(k in t for k in ["write", "draft", "email"]):
+        return [
+            f"Can you rewrite this {topic} in a shorter tone?",
+            f"Can you give 3 versions of this {topic} for different audiences?",
+            f"What subject line works best for this {topic}?"
+        ]
+    return [
+        f"Can you go deeper into {topic}?",
+        f"What are practical next steps for {topic}?",
+        f"What risks or tradeoffs should I consider for {topic}?"
+    ]
+
+
+async def _generate_title_and_followups(message: str, response: str) -> Dict[str, Any]:
+    """
+    Generate a title and follow-ups based on prompt + answer.
+    """
+    client = openai_service.client
+    message_text = message or ""
+    response_text = (response or "")[:1000]
+
+    async def generate_title():
+        try:
+            resp = await client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {"role": "system", "content": "Generate a concise 3-6 word title for this conversation. Return ONLY the title, no quotes or punctuation at the end."},
+                    {"role": "user", "content": message_text},
+                    {"role": "assistant", "content": response_text}
+                ],
+                max_completion_tokens=20,
+            )
+            return resp.choices[0].message.content.strip().strip('"\'')
+        except Exception as e:
+            print(f"Title generation error: {e}")
+            return message_text[:30] + ("..." if len(message_text) > 30 else "")
+
+    async def generate_followups():
+        try:
+            resp = await client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Generate exactly 3 follow-up questions tailored to the user's prompt and the assistant answer. "
+                            "Return ONLY a JSON array of 3 strings. "
+                            "Each question must reference specific details from the answer (terms, steps, constraints, or numbers). "
+                            "Avoid generic questions like 'key takeaways'. Keep each question under 90 characters."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"User prompt:\n{message_text}\n\n"
+                            f"Assistant answer:\n{response_text}"
+                        )
+                    }
+                ],
+                max_completion_tokens=200,
+            )
+            raw = resp.choices[0].message.content.strip()
+            
+            followups: List[str] = []
+
+            # 1) Direct JSON parse
+            try:
+                followups = _normalize_followups(json.loads(raw))
+            except json.JSONDecodeError:
+                followups = []
+
+            # 2) Extract JSON array if wrapped with extra text
+            if not followups:
+                match = re.search(r"\[[\s\S]*\]", raw)
+                if match:
+                    try:
+                        followups = _normalize_followups(json.loads(match.group(0)))
+                    except json.JSONDecodeError:
+                        followups = []
+
+            # 3) Extract quoted items
+            if not followups:
+                quoted = re.findall(r'"([^"\n]{8,140})"', raw)
+                followups = _normalize_followups(quoted)
+
+            # 4) Parse list-style lines
+            if not followups:
+                lines = [line.strip() for line in raw.split("\n") if line.strip()]
+                followups = _normalize_followups(lines)
+
+            if followups:
+                return followups[:3]
+            return _fallback_followups(message_text)
+        except Exception as e:
+            print(f"Follow-up generation error: {e}")
+            try:
+                print(f"FAILED CONTENT: {resp.choices[0].message.content}")
+            except:
+                pass
+            return _fallback_followups(message_text)
+
+    title, followups = await asyncio.gather(generate_title(), generate_followups())
+    return {"title": title, "followups": followups}
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
     """
-    Streaming chat endpoint for instant perceived response.
+    Streaming chat endpoint for real-time tokens and post-stream suggestions.
     
-    Returns Server-Sent Events (SSE) with chunks:
+    SSE events:
     - {"type": "start", "model": "...", "complexity": "..."}
     - {"type": "content", "text": "..."}
     - {"type": "done", "response_time_ms": ...}
+    - {"type": "suggestions", "title": "...", "followups": ["...", "...", "..."]}
     """
     async def generate():
-        # Yield "thinking" indicator immediately for instant feedback
         yield f"data: {json.dumps({'type': 'thinking'})}\n\n"
-        
-        async for chunk in openai_service.chat_stream(
-            message=request.message,
-            conversation_history=request.history,
-            use_rag=request.use_rag,
-            doc_ids=request.doc_ids
-        ):
-            yield f"data: {json.dumps(chunk)}\n\n"
+
+        response_parts: List[str] = []
+        response_ready = asyncio.Event()
+
+        async def suggestions_worker():
+            await response_ready.wait()
+            full_response = "".join(response_parts).strip()
+            if not full_response:
+                return {
+                    "title": request.message[:30] + ("..." if len(request.message) > 30 else ""),
+                    "followups": _fallback_followups(request.message)
+                }
+            return await _generate_title_and_followups(request.message, full_response)
+
+        suggestions_task = asyncio.create_task(suggestions_worker())
+        stream_finished = False
+
+        try:
+            async for chunk in openai_service.chat_stream(
+                message=request.message,
+                conversation_history=request.history,
+                use_rag=request.use_rag,
+                doc_ids=request.doc_ids
+            ):
+                if chunk.get("type") == "content":
+                    response_parts.append(chunk.get("text", ""))
+                if chunk.get("type") == "done" and not stream_finished:
+                    stream_finished = True
+                    response_ready.set()
+
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+            if not stream_finished:
+                response_ready.set()
+
+            suggestions = await suggestions_task
+            yield f"data: {json.dumps({'type': 'suggestions', **suggestions})}\n\n"
+        except Exception as e:
+            if not response_ready.is_set():
+                response_ready.set()
+            if not suggestions_task.done():
+                suggestions_task.cancel()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(
         generate(),
@@ -210,7 +394,7 @@ async def chat_stream(request: ChatRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
+            "X-Accel-Buffering": "no"
         }
     )
 
@@ -219,72 +403,8 @@ async def chat_stream(request: ChatRequest):
 async def chat_suggest(request: SuggestRequest):
     """
     Generate a chat title and follow-up questions in parallel.
-    Uses the cheapest model (gpt-5-nano) for speed and cost efficiency.
     """
-    client = openai_service.client
-
-    async def generate_title():
-        try:
-            resp = await client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[
-                    {"role": "system", "content": "Generate a concise 3-6 word title for this conversation. Return ONLY the title, no quotes or punctuation at the end."},
-                    {"role": "user", "content": request.message},
-                    {"role": "assistant", "content": request.response[:500]}
-                ],
-                max_completion_tokens=20,
-            )
-            return resp.choices[0].message.content.strip().strip('"\'')
-        except Exception as e:
-            print(f"Title generation error: {e}")
-            return request.message[:30] + ("..." if len(request.message) > 30 else "")
-
-    async def generate_followups():
-        try:
-            resp = await client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[
-                    {"role": "system", "content": "Based on this conversation, suggest exactly 3 brief follow-up questions the user might ask next. Return ONLY a JSON array of 3 strings, nothing else. Keep each question under 60 characters."},
-                    {"role": "user", "content": request.message},
-                    {"role": "assistant", "content": request.response[:500]}
-                ],
-                max_completion_tokens=200,
-            )
-            raw = resp.choices[0].message.content.strip()
-            
-            # Try to find JSON array pattern
-            match = re.search(r'\[[\s\S]*\]', raw)
-            if match:
-                raw = match.group(0)
-            
-            try:
-                followups = json.loads(raw)
-            except json.JSONDecodeError:
-                # Fallback: try to split by newlines and clean up
-                lines = raw.split('\n')
-                followups = []
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.startswith('[') and not line.startswith(']'):
-                        # Remove numbering like "1. ", "- "
-                        clean_line = re.sub(r'^[\d-]+\.\s*|-\s*', '', line).strip('"').strip("'")
-                        if clean_line:
-                            followups.append(clean_line)
-
-            if isinstance(followups, list):
-                return [str(q).strip() for q in followups[:3]]
-            return []
-        except Exception as e:
-            print(f"Follow-up generation error: {e}")
-            try:
-                print(f"FAILED CONTENT: {resp.choices[0].message.content}")
-            except:
-                pass
-            return []
-
-    title, followups = await asyncio.gather(generate_title(), generate_followups())
-
-    return {"title": title, "followups": followups}
+    return await _generate_title_and_followups(request.message, request.response)
 
 
 @app.get("/api/health")
