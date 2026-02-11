@@ -105,19 +105,7 @@ export default function Home() {
 
     setChats(prev => prev.map(chat => {
       if (chat.id === currentChatId) {
-        // Auto-title the chat based on first user message if title is 'New Chat'
-        let title = chat.title
-        if (title === 'New Chat' && message.role === 'user') {
-          title = message.content.slice(0, 30) + (message.content.length > 30 ? '...' : '')
-
-          // Update title on server
-          if (!isGuest) {
-            api.updateChat(chat.id, title).catch(err =>
-              console.error('Failed to update chat title:', err)
-            )
-          }
-        }
-        return { ...chat, title, messages: [...chat.messages, message] }
+        return { ...chat, messages: [...chat.messages, message] }
       }
       return chat
     }))
@@ -147,6 +135,24 @@ export default function Home() {
     if (!isGuest) {
       api.updateMessage(currentChatId, messageId, updates).catch(err =>
         console.error('Failed to update message:', err)
+      )
+    }
+  }, [currentChatId, isGuest])
+
+  const handleUpdateTitle = useCallback((title: string) => {
+    if (!currentChatId) return
+
+    setChats(prev => prev.map(chat => {
+      if (chat.id === currentChatId && chat.title === 'New Chat') {
+        return { ...chat, title }
+      }
+      return chat
+    }))
+
+    // Persist title to server (non-guest)
+    if (!isGuest) {
+      api.updateChat(currentChatId, title).catch(err =>
+        console.error('Failed to update chat title:', err)
       )
     }
   }, [currentChatId, isGuest])
@@ -225,10 +231,12 @@ export default function Home() {
           <ChatArea
             key={currentChat.id} // Force remount on chat switch to reset scroll/input
             messages={currentChat.messages}
+            chatId={currentChat.id}
             chatTitle={currentChat.title}
             onAddMessage={handleAddMessage}
             onUpdateMessage={handleUpdateMessage}
             onRemoveMessagesAfter={handleRemoveMessagesAfter}
+            onUpdateTitle={handleUpdateTitle}
             onNewChat={handleNewChat}
           />
         )}

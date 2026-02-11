@@ -1,6 +1,8 @@
 import json
+import re
 import jwt
 import secrets
+import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -118,6 +120,11 @@ class DeleteMessagesAfterRequest(BaseModel):
     after_message_id: str
 
 
+class SuggestRequest(BaseModel):
+    message: str
+    response: str
+
+
 async def get_user_id_from_request(request: Request) -> str:
     """Extract user_id from JWT token in the Authorization header."""
     auth_header = request.headers.get("Authorization")
@@ -206,6 +213,78 @@ async def chat_stream(request: ChatRequest):
             "X-Accel-Buffering": "no"  # Disable nginx buffering
         }
     )
+
+
+@app.post("/api/chat/suggest")
+async def chat_suggest(request: SuggestRequest):
+    """
+    Generate a chat title and follow-up questions in parallel.
+    Uses the cheapest model (gpt-5-nano) for speed and cost efficiency.
+    """
+    client = openai_service.client
+
+    async def generate_title():
+        try:
+            resp = await client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {"role": "system", "content": "Generate a concise 3-6 word title for this conversation. Return ONLY the title, no quotes or punctuation at the end."},
+                    {"role": "user", "content": request.message},
+                    {"role": "assistant", "content": request.response[:500]}
+                ],
+                max_completion_tokens=20,
+            )
+            return resp.choices[0].message.content.strip().strip('"\'')
+        except Exception as e:
+            print(f"Title generation error: {e}")
+            return request.message[:30] + ("..." if len(request.message) > 30 else "")
+
+    async def generate_followups():
+        try:
+            resp = await client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {"role": "system", "content": "Based on this conversation, suggest exactly 3 brief follow-up questions the user might ask next. Return ONLY a JSON array of 3 strings, nothing else. Keep each question under 60 characters."},
+                    {"role": "user", "content": request.message},
+                    {"role": "assistant", "content": request.response[:500]}
+                ],
+                max_completion_tokens=200,
+            )
+            raw = resp.choices[0].message.content.strip()
+            
+            # Try to find JSON array pattern
+            match = re.search(r'\[[\s\S]*\]', raw)
+            if match:
+                raw = match.group(0)
+            
+            try:
+                followups = json.loads(raw)
+            except json.JSONDecodeError:
+                # Fallback: try to split by newlines and clean up
+                lines = raw.split('\n')
+                followups = []
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith('[') and not line.startswith(']'):
+                        # Remove numbering like "1. ", "- "
+                        clean_line = re.sub(r'^[\d-]+\.\s*|-\s*', '', line).strip('"').strip("'")
+                        if clean_line:
+                            followups.append(clean_line)
+
+            if isinstance(followups, list):
+                return [str(q).strip() for q in followups[:3]]
+            return []
+        except Exception as e:
+            print(f"Follow-up generation error: {e}")
+            try:
+                print(f"FAILED CONTENT: {resp.choices[0].message.content}")
+            except:
+                pass
+            return []
+
+    title, followups = await asyncio.gather(generate_title(), generate_followups())
+
+    return {"title": title, "followups": followups}
 
 
 @app.get("/api/health")

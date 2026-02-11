@@ -4,14 +4,17 @@ import { useState, useRef, useEffect } from 'react'
 import type { Message } from '@/app/page'
 import MessageBubble from './MessageBubble'
 import ChatExport from './ChatExport'
-import { ArrowUp, Paperclip, Search, Square, Loader2, Check, X, FileText } from 'lucide-react'
+import { ArrowUp, Paperclip, Search, Square, Loader2, Check, X, FileText, Repeat, CornerDownRight, Plus } from 'lucide-react'
+import * as api from '@/lib/api'
 
 interface ChatAreaProps {
   messages: Message[]
+  chatId: string
   chatTitle: string
   onAddMessage: (message: Message) => void
   onUpdateMessage: (messageId: string, updates: Partial<Message>) => void
   onRemoveMessagesAfter: (messageId: string) => void
+  onUpdateTitle: (title: string) => void
   onNewChat: () => void
 }
 
@@ -202,13 +205,14 @@ function InputBox({
   )
 }
 
-export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMessage, onRemoveMessagesAfter, onNewChat }: ChatAreaProps) {
+export default function ChatArea({ messages, chatId, chatTitle, onAddMessage, onUpdateMessage, onRemoveMessagesAfter, onUpdateTitle, onNewChat }: ChatAreaProps) {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [prompts, setPrompts] = useState<string[]>([])
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [followupQuestions, setFollowupQuestions] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -299,6 +303,16 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
           sources: data.sources || [],
           reaction: null
         })
+
+        // Generate suggestions if this is the last message
+        if (messageIndex === messages.length - 1) {
+          api.suggestTitleAndFollowups(userMessage.content, data.response)
+            .then(({ title, followups }) => {
+              if (chatTitle === 'New Chat' && title) onUpdateTitle(title)
+              if (followups && followups.length > 0) setFollowupQuestions(followups)
+            })
+            .catch(err => console.error('Regenerate suggest failed:', err))
+        }
       }
     } catch (error) {
       console.error('Regenerate failed:', error)
@@ -348,6 +362,14 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
           usage: data.usage,
           sources: data.sources || []
         })
+
+        // Generate suggestions
+        api.suggestTitleAndFollowups(newContent, data.response)
+          .then(({ title, followups }) => {
+            if (chatTitle === 'New Chat' && title) onUpdateTitle(title)
+            if (followups && followups.length > 0) setFollowupQuestions(followups)
+          })
+          .catch(err => console.error('Edit suggest failed:', err))
       }
     } catch (error) {
       console.error('Edit submission failed:', error)
@@ -450,6 +472,7 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
     onAddMessage(userMessage)
     setInput('')
     setUploadedFiles([]) // Clear files after sending
+    setFollowupQuestions([]) // Clear follow-ups when sending new message
     setIsLoading(true)
 
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -471,16 +494,30 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
       const data = await response.json()
 
       if (response.ok) {
+        const assistantContent = data.response
         onAddMessage({
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: data.response,
+          content: assistantContent,
           model: data.model,
           complexity: data.complexity,
           responseTime: data.response_time_ms,
           usage: data.usage,
           sources: data.sources || []
         })
+
+        // Fire suggest API in parallel (non-blocking) for title + follow-ups
+        api.suggestTitleAndFollowups(currentInput, assistantContent)
+          .then(({ title, followups }) => {
+            // Only update title if it's still 'New Chat'
+            if (chatTitle === 'New Chat' && title) {
+              onUpdateTitle(title)
+            }
+            if (followups && followups.length > 0) {
+              setFollowupQuestions(followups)
+            }
+          })
+          .catch(err => console.error('Suggest failed:', err))
       } else {
         onAddMessage({
           id: (Date.now() + 1).toString(),
@@ -497,6 +534,72 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
     }
 
     setIsLoading(false)
+  }
+
+  // Handle follow-up chip click — auto-fill and submit
+  const handleFollowupClick = (question: string) => {
+    setInput(question)
+    // Use setTimeout to ensure setState has flushed before we submit
+    setTimeout(() => {
+      const fakeEvent = { preventDefault: () => { } } as React.FormEvent
+      // Directly call submit logic with the question
+      const submitFollowup = async () => {
+        const userMessage: Message = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: question
+        }
+        onAddMessage(userMessage)
+        setInput('')
+        setFollowupQuestions([])
+        setIsLoading(true)
+
+        try {
+          const response = await fetch('http://localhost:8000/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: question,
+              history: [...messages, userMessage].map(m => ({ role: m.role, content: m.content })),
+              use_rag: false
+            })
+          })
+
+          const data = await response.json()
+
+          if (response.ok) {
+            onAddMessage({
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: data.response,
+              model: data.model,
+              complexity: data.complexity,
+              responseTime: data.response_time_ms,
+              usage: data.usage,
+              sources: data.sources || []
+            })
+
+            // Get new follow-ups for the new response
+            api.suggestTitleAndFollowups(question, data.response)
+              .then(({ followups }) => {
+                if (followups && followups.length > 0) {
+                  setFollowupQuestions(followups)
+                }
+              })
+              .catch(err => console.error('Suggest failed:', err))
+          }
+        } catch {
+          onAddMessage({
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: 'Unable to connect to server.',
+          })
+        }
+
+        setIsLoading(false)
+      }
+      submitFollowup()
+    }, 0)
   }
 
   return (
@@ -591,6 +694,41 @@ export default function ChatArea({ messages, chatTitle, onAddMessage, onUpdateMe
                   onReaction={message.role === 'assistant' ? handleReaction : undefined}
                 />
               ))}
+
+              {/* Follow-up / Related Questions */}
+              {followupQuestions.length > 0 && !isLoading && (
+                <div className="w-full max-w-3xl mx-auto mt-8 mb-4 animate-fadeIn px-1">
+                  <div className="flex items-center gap-2 mb-3 text-zinc-500 dark:text-zinc-400 ml-1">
+                    <Repeat size={18} />
+                    <span className="font-medium text-lg">Related</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {followupQuestions.map((question, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleFollowupClick(question)}
+                        className="
+                          group flex items-center justify-between w-full py-3 px-4
+                          bg-transparent
+                          hover:bg-zinc-100 dark:hover:bg-zinc-800/50
+                          border-t border-zinc-200 dark:border-zinc-800
+                          first:border-t-0
+                          transition-all duration-200 text-left
+                        "
+                        style={{ animationDelay: `${i * 0.1}s` }}
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <CornerDownRight size={16} className="shrink-0 text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors" />
+                          <span className="text-zinc-700 dark:text-zinc-300 font-medium text-base truncate group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors">
+                            {question}
+                          </span>
+                        </div>
+                        <Plus size={18} className="shrink-0 text-zinc-300 dark:text-zinc-600 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors ml-4" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {isLoading && (
                 <div className="py-0">

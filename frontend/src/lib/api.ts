@@ -91,3 +91,18 @@ export async function deleteMessagesAfter(chatId: string, afterMessageId: string
         body: JSON.stringify({ after_message_id: afterMessageId }),
     })
 }
+
+// ==================== Suggestion Operations ====================
+
+export async function suggestTitleAndFollowups(
+    message: string,
+    response: string
+): Promise<{ title: string; followups: string[] }> {
+    const res = await fetch(`${API_URL}/api/chat/suggest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, response }),
+    })
+    if (!res.ok) return { title: message.slice(0, 30), followups: [] }
+    return res.json()
+}
